@@ -1,0 +1,208 @@
+# ─────────────────────────────────────────────────────────────────
+# NeuroMem — Brain-Inspired Memory Stack
+# ─────────────────────────────────────────────────────────────────
+# Services map to brain regions:
+#   postgres  → Hippocampus (episodic timeline)
+#   chromadb  → Temporal Cortex (semantic vectors)
+#   neo4j     → Entorhinal Cortex (associative graph)
+#   redis     → Prefrontal Cortex (working memory, TTL)
+#   neuromem  → The MCP server orchestrating them all
+# ─────────────────────────────────────────────────────────────────
+
+services:
+  # ═══ Hippocampus: Episodic memory (timeline, events) ═══
+  postgres:
+    image: postgres:16-alpine
+    container_name: neuromem-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-neuromem}
+      POSTGRES_USER: ${POSTGRES_USER:-neuromem}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-neuromem}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - neuromem-net
+
+  # ═══ Temporal Cortex: Semantic memory (vector similarity) ═══
+  chromadb:
+    image: chromadb/chroma:0.6.3
+    container_name: neuromem-chromadb
+    restart: unless-stopped
+    environment:
+      IS_PERSISTENT: "TRUE"
+      ANONYMIZED_TELEMETRY: "FALSE"
+      CHROMA_SERVER_AUTHN_CREDENTIALS: ${CHROMA_TOKEN:-neuromem-secret}
+      CHROMA_SERVER_AUTHN_PROVIDER: "chromadb.auth.token_authn.TokenAuthenticationServerProvider"
+    volumes:
+      - chromadb_data:/chroma/chroma
+    ports:
+      - "${CHROMA_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - neuromem-net
+
+  # ═══ Entorhinal Cortex: Memory associations (graph) ═══
+  neo4j:
+    image: neo4j:5.24-community
+    container_name: neuromem-neo4j
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-neuromem-pass}
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_dbms_memory_heap_max__size: 512M
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    ports:
+      - "${NEO4J_HTTP_PORT:-7474}:7474"
+      - "${NEO4J_BOLT_PORT:-7687}:7687"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "cypher-shell -u neo4j -p ${NEO4J_PASSWORD:-neuromem-pass} 'RETURN 1'",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - neuromem-net
+
+  # ═══ Prefrontal Cortex: Working memory (fast, ephemeral) ═══
+  redis:
+    image: redis:7-alpine
+    container_name: neuromem-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+      --requirepass ${REDIS_PASSWORD:-neuromem-redis}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test:
+        ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-neuromem-redis}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - neuromem-net
+
+  # ═══ The NeuroMem MCP server (orchestrator) ═══
+  neuromem:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: neuromem-server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      chromadb:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      # Postgres
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-neuromem}
+      POSTGRES_USER: ${POSTGRES_USER:-neuromem}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      # Chroma
+      CHROMA_HOST: chromadb
+      CHROMA_PORT: 8000
+      CHROMA_TOKEN: ${CHROMA_TOKEN:-neuromem-secret}
+      # Neo4j
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: ${NEO4J_USER:-neo4j}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-neuromem-pass}
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-neuromem-redis}
+      # Embeddings (optional — enables real semantic search)
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-local}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Inner thoughts (local LLM)
+      # Uses native Ollama on Mac host for Metal GPU acceleration (M-series chips)
+      OLLAMA_URL: http://host.docker.internal:11434
+      INNER_THOUGHT_MODEL: ${INNER_THOUGHT_MODEL:-llama3.2:3b}
+      INNER_THOUGHT_TIMEOUT_MS: ${INNER_THOUGHT_TIMEOUT_MS:-2000}
+      COGNITION_ENABLED: ${COGNITION_ENABLED:-true}
+      COGNITION_INTERVAL_MINUTES: ${COGNITION_INTERVAL_MINUTES:-30}
+      # Server mode: 'stdio' (MCP via stdio) or 'http' (REST + SSE)
+      SERVER_MODE: ${SERVER_MODE:-http}
+      HTTP_PORT: 3000
+    ports:
+      - "${NEUROMEM_PORT:-3000}:3000"
+    networks:
+      - neuromem-net
+
+  # ═══ Inner Thoughts: Local LLM (offline cognition) ═══
+  # Disabled — using native Ollama on host via host.docker.internal:11434
+  # To re-enable, uncomment and update OLLAMA_URL in neuromem environment
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   container_name: neuromem-ollama
+  #   restart: unless-stopped
+  #   volumes:
+  #     - ollama_data:/root/.ollama
+  #   ports:
+  #     - "${OLLAMA_PORT:-11434}:11434"
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 5
+  #     start_period: 60s
+  #   networks:
+  #     - neuromem-net
+
+  # ollama-init:
+  #   image: ollama/ollama:latest
+  #   container_name: neuromem-ollama-init
+  #   depends_on:
+  #     ollama:
+  #       condition: service_healthy
+  #   entrypoint: ["ollama", "pull", "${INNER_THOUGHT_MODEL:-llama3.2:3b}"]
+  #   environment:
+  #     OLLAMA_HOST: http://ollama:11434
+  #   networks:
+  #     - neuromem-net
+  #   restart: "no"
+
+volumes:
+  postgres_data:
+  chromadb_data:
+  neo4j_data:
+  neo4j_logs:
+  redis_data:
+  ollama_data:
+
+networks:
+  neuromem-net:
+    driver: bridge

@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+backups/
+*.log
+.DS_Store
+
+ui/node_modules/
+
+docs/superpowers/
