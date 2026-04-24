@@ -287,49 +287,80 @@ Respond with only the JSON array.`;
 
   async recall(query: RecallQuery): Promise<RecallResult> {
     const requestedTypes = this.normalizeTypes(query.type);
-    const searches: Promise<Memory[]>[] = [];
 
+    // Fan out to each store. We keep each store's list ORDERED by that store's
+    // native relevance signal (vector distance for semantic/procedural, token
+    // overlap + importance for episodic, recency for working) so we can do
+    // rank-based fusion rather than score-based fusion across incompatible
+    // scales.
+    // Per-store weights for RRF: semantic/procedural use true vector similarity
+    // so their ranks are the most trustworthy signal of topical match. Episodic
+    // ranks are token-overlap-based (noisy — "migration" matches outage reports
+    // as well as migration howtos). Working ranks are recency-weighted keyword
+    // overlap. Weighting episodic/working below semantic prevents a high-
+    // importance-but-topically-weak episodic from beating the true semantic
+    // top-1 when RRF points would otherwise tie at 1/(K+1).
+    const storeSearches: Array<{ name: string; search: Promise<Memory[]> }> = [];
     if (requestedTypes.has("working")) {
-      searches.push(this.working.recall(query));
+      storeSearches.push({ name: "working", search: this.working.recall(query) });
     }
     if (
       requestedTypes.has("episodic") ||
       requestedTypes.has("affective") ||
       requestedTypes.has("shared")
     ) {
-      searches.push(this.episodic.recall(query));
+      storeSearches.push({ name: "episodic", search: this.episodic.recall(query) });
     }
     if (requestedTypes.has("semantic") || requestedTypes.has("procedural")) {
-      searches.push(this.semantic.recall(query));
+      storeSearches.push({ name: "semantic", search: this.semantic.recall(query) });
     }
 
-    const results = (await Promise.all(searches)).flat();
+    const storeLists = await Promise.all(storeSearches.map((s) => s.search));
+    const flatResults = storeLists.flat();
 
     // Reinforce episodic memories that appear in results
-    for (const m of results) {
+    for (const m of flatResults) {
       if (m.id.startsWith("epi_")) {
         this.episodic.reinforce(m.id).catch(() => {}); // fire-and-forget
       }
     }
 
-    // Rank combined list by importance × recency
-    const now = Date.now();
-    const ranked = results
-      .map((m) => {
-        const age =
-          (now - new Date(m.timestamp).getTime()) / (1000 * 60 * 60 * 24);
-        const recency = Math.exp(-age * (m.decay_rate || 0.05));
-        const score = m.importance * 0.6 + recency * 0.4;
-        return { m, score };
+    // ─── Reciprocal Rank Fusion ───────────────────────────────────
+    // For each store's ordered list, each memory gets 1/(RRF_K + rank) points.
+    // A memory returned by multiple stores accumulates points across them.
+    //
+    // Importance is a STRICT TIEBREAKER, not an additive. Adding importance
+    // to the RRF score lets importance swamp rank position (importance * 0.05
+    // is ~3x the rank-range of RRF itself), which reintroduces the bug RRF
+    // was meant to fix. When two memories truly tie on RRF, importance breaks
+    // the tie; otherwise, store-native ranking wins.
+    const RRF_K = 60;
+    const scoreByMem = new Map<string, { mem: Memory; score: number }>();
+
+    for (const list of storeLists) {
+      list.forEach((m, idx) => {
+        const rrf = 1 / (RRF_K + idx + 1);
+        const existing = scoreByMem.get(m.id);
+        if (existing) {
+          existing.score += rrf;
+        } else {
+          scoreByMem.set(m.id, { mem: m, score: rrf });
+        }
+      });
+    }
+
+    const ranked = [...scoreByMem.values()]
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return (b.mem.importance ?? 0) - (a.mem.importance ?? 0);
       })
-      .sort((a, b) => b.score - a.score)
       .slice(0, query.limit ?? 10)
-      .map((x) => x.m);
+      .map((x) => x.mem);
 
     return {
       memories: ranked.map((m) => withRetention(m)),
-      strategy: "hybrid",
-      scanned: results.length,
+      strategy: "rrf",
+      scanned: flatResults.length,
     };
   }
 

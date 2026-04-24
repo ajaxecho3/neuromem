@@ -101,20 +101,21 @@ export class SemanticStore {
   }
 
   async recall(query: RecallQuery): Promise<Memory[]> {
-    const types: ("semantic" | "procedural")[] = [];
+    // When no type filter is supplied, query BOTH collections. Previously this
+    // only hit `semantic`, which meant procedural memories (how-to's) were
+    // invisible unless the caller explicitly filtered for them.
     const qt = Array.isArray(query.type)
       ? query.type
       : query.type
         ? [query.type]
         : [];
-    if (qt.includes("semantic") || qt.length === 0) types.push("semantic");
-    if (qt.includes("procedural")) types.push("procedural");
+    const types: ("semantic" | "procedural")[] = [];
+    if (qt.length === 0 || qt.includes("semantic")) types.push("semantic");
+    if (qt.length === 0 || qt.includes("procedural")) types.push("procedural");
 
     const [queryEmbedding] = await this.embedder.embed([query.query]);
 
-    const whereClause: any = {};
     const conditions: any[] = [];
-
     if (query.include_shared) {
       conditions.push({
         $or: [{ agent_id: query.agent_id }, { shared: true }],
@@ -125,49 +126,61 @@ export class SemanticStore {
     if (query.min_importance !== undefined) {
       conditions.push({ importance: { $gte: query.min_importance } });
     }
-
     const where =
       conditions.length === 1 ? conditions[0] : { $and: conditions };
 
-    const results: Memory[] = [];
+    // Collect results from every collection with their Chroma distances so we
+    // can fuse them by similarity rather than by importance.
+    // Each collection gets its own `limit` budget so procedural memories don't
+    // get starved out by semantic matches (or vice versa).
+    type Scored = { mem: Memory; distance: number };
+    const scored: Scored[] = [];
+    const perCollectionLimit = query.limit ?? 10;
+
     for (const type of types) {
       const coll = type === "semantic" ? this.semantic : this.procedural;
       const res = await coll.query({
         queryEmbeddings: [queryEmbedding],
-        nResults: query.limit ?? 10,
+        nResults: perCollectionLimit,
         where,
       });
 
       const ids = res.ids[0] ?? [];
       const docs = res.documents[0] ?? [];
       const metas = res.metadatas[0] ?? [];
+      const dists = res.distances?.[0] ?? [];
 
       for (let i = 0; i < ids.length; i++) {
         const meta = metas[i] as any;
-        results.push({
-          id: ids[i]!,
-          type,
-          agent_id: meta.agent_id,
-          title: meta.title,
-          content: docs[i] ?? "",
-          timestamp: meta.timestamp,
-          last_accessed: new Date().toISOString(),
-          access_count: (meta.access_count ?? 0) + 1,
-          importance: meta.importance,
-          valence: meta.valence,
-          arousal: meta.arousal,
-          consolidation_level: meta.consolidation_level,
-          decay_rate: meta.decay_rate,
-          tags: meta.tags ? String(meta.tags).split(",").filter(Boolean) : [],
-          source: meta.source || undefined,
-          shared: meta.shared,
+        const distance = typeof dists[i] === "number" ? (dists[i] as number) : Number.POSITIVE_INFINITY;
+        scored.push({
+          distance,
+          mem: {
+            id: ids[i]!,
+            type,
+            agent_id: meta.agent_id,
+            title: meta.title,
+            content: docs[i] ?? "",
+            timestamp: meta.timestamp,
+            last_accessed: new Date().toISOString(),
+            access_count: (meta.access_count ?? 0) + 1,
+            importance: meta.importance,
+            valence: meta.valence,
+            arousal: meta.arousal,
+            consolidation_level: meta.consolidation_level,
+            decay_rate: meta.decay_rate,
+            tags: meta.tags ? String(meta.tags).split(",").filter(Boolean) : [],
+            source: meta.source || undefined,
+            shared: meta.shared,
+          },
         });
       }
     }
 
-    // Sort by importance
-    results.sort((a, b) => b.importance - a.importance);
-    return results.slice(0, query.limit ?? 10);
+    // Rank by vector similarity (lower distance = closer). Preserving this
+    // order is what lets callers (MemoryManager) do rank-based fusion like RRF.
+    scored.sort((a, b) => a.distance - b.distance);
+    return scored.slice(0, query.limit ?? 10).map((s) => s.mem);
   }
 
   /** List memories without embedding search — for browse/pagination use cases */

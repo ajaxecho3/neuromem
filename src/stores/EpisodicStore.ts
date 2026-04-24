@@ -103,9 +103,22 @@ export class EpisodicStore {
     }
     sql += `)`;
 
-    if (query.query && query.query.trim()) {
-      params.push(`%${query.query}%`);
-      sql += ` AND (content ILIKE $${params.length} OR title ILIKE $${params.length})`;
+    // Tokenize the query and match ANY token against content/title. The old
+    // behaviour used `content ILIKE '%<full query>%'`, which only matched
+    // literal substrings — paraphrased queries never matched. Token-level OR
+    // matching lets "what caused the April outage" match a memory that
+    // mentions "April" and "outage" even if the exact phrase isn't present.
+    const tokens = tokenizeForRecall(query.query);
+    if (tokens.length > 0) {
+      const clauses: string[] = [];
+      for (const tok of tokens) {
+        params.push(`%${tok}%`);
+        const placeholder = `$${params.length}`;
+        clauses.push(
+          `(content ILIKE ${placeholder} OR title ILIKE ${placeholder})`,
+        );
+      }
+      sql += ` AND (${clauses.join(" OR ")})`;
     }
     if (query.min_importance !== undefined) {
       params.push(query.min_importance);
@@ -124,19 +137,54 @@ export class EpisodicStore {
       sql += ` AND occurred_at <= $${params.length}`;
     }
 
+    // Rank by number of matching tokens (most-overlap first), then by
+    // importance/recency as tiebreakers. Without the per-token count the top
+    // rows were whichever had the highest importance, regardless of how well
+    // they actually matched the query.
+    const matchCountSql = tokens.length
+      ? "(" +
+        tokens
+          .map((_, i) => {
+            // params already contain the %tok% placeholders from above; reuse them.
+            const placeholderIndex = i + 2; // +1 for agent_id, +1 because 1-indexed
+            return `((content ILIKE $${placeholderIndex})::int + (title ILIKE $${placeholderIndex})::int)`;
+          })
+          .join(" + ") +
+        ")"
+      : "(0)";
+
     sql += ` ORDER BY
+      ${tokens.length > 0 ? `${matchCountSql} DESC,` : ""}
       (importance * 0.6 +
        (1.0 / (1.0 + EXTRACT(EPOCH FROM (now() - occurred_at)) / 86400.0)) * 0.4) DESC
       LIMIT ${limit}`;
 
     const res = await this.pool.query(sql, params);
 
+    // Filter out weak matches. Token-OR matching returns rows that share ANY
+    // token with the query — including high-frequency words like "database"
+    // that appear across many unrelated memories. For the merged rank-1 slot
+    // to mean "this memory is topically close", require at least ~30% token
+    // overlap (or 2 tokens, whichever is less) when the query has multiple
+    // tokens. Short queries skip the filter to preserve single-keyword probes.
+    let rows = res.rows;
+    if (tokens.length >= 3) {
+      const minMatches = Math.max(2, Math.ceil(tokens.length * 0.3));
+      const lowered = tokens.map((t) => t.toLowerCase());
+      rows = rows.filter((r) => {
+        const hay = `${r.content ?? ""}\n${r.title ?? ""}`.toLowerCase();
+        let hits = 0;
+        for (const tok of lowered) if (hay.includes(tok)) hits++;
+        return hits >= minMatches;
+      });
+    }
+
     // Bump access counts
-    for (const row of res.rows) {
+    for (const row of rows) {
       await this.pool.query(`SELECT touch_episodic($1)`, [row.id]);
     }
 
-    return res.rows.map(rowToMemory);
+    return rows.map(rowToMemory);
   }
 
   async listForConsolidation(agent_id: string): Promise<Memory[]> {
@@ -409,4 +457,128 @@ function clamp01(n: number): number {
 function deriveTitle(content: string): string {
   const first = content.trim().split("\n")[0] ?? "untitled";
   return first.replace(/^#+\s*/, "").slice(0, 80);
+}
+
+/**
+ * Break a natural-language query into recall-useful tokens.
+ * - Lowercases
+ * - Drops non-alphanumeric
+ * - Drops short (<3 char) words
+ * - Drops a small set of English stop words that show up in every query
+ * - Dedupes
+ * Returns [] for empty / all-stop-word queries so recall falls back to
+ * importance/recency ordering.
+ */
+const RECALL_STOP_WORDS = new Set([
+  "the",
+  "and",
+  "for",
+  "are",
+  "but",
+  "not",
+  "you",
+  "all",
+  "can",
+  "had",
+  "was",
+  "are",
+  "our",
+  "has",
+  "have",
+  "how",
+  "its",
+  "new",
+  "now",
+  "did",
+  "use",
+  "that",
+  "this",
+  "with",
+  "from",
+  "they",
+  "will",
+  "been",
+  "were",
+  "what",
+  "which",
+  "when",
+  "where",
+  "why",
+  "who",
+  "whom",
+  "whose",
+  "about",
+  "into",
+  "onto",
+  "out",
+  "off",
+  "over",
+  "under",
+  "down",
+  "than",
+  "then",
+  "else",
+  "some",
+  "any",
+  "each",
+  "every",
+  "many",
+  "much",
+  "more",
+  "most",
+  "just",
+  "very",
+  "really",
+  "still",
+  "also",
+  "too",
+  "very",
+  "well",
+  "get",
+  "got",
+  "give",
+  "gave",
+  "make",
+  "made",
+  "take",
+  "took",
+  "look",
+  "see",
+  "saw",
+  "know",
+  "knew",
+  "think",
+  "thought",
+  "tell",
+  "told",
+  "say",
+  "said",
+  "call",
+  "go",
+  "went",
+  "come",
+  "came",
+  "want",
+  "need",
+  "put",
+  "let",
+  "been",
+  "being",
+  "is",
+  "am",
+  "be",
+  "do",
+  "does",
+  "doing",
+  "done",
+]);
+
+function tokenizeForRecall(raw?: string): string[] {
+  if (!raw) return [];
+  const tokens = raw
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]+/gu, " ")
+    .split(/\s+/)
+    .filter((t) => t.length >= 3 && !RECALL_STOP_WORDS.has(t));
+  return [...new Set(tokens)];
 }

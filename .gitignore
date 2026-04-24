@@ -8,3 +8,4 @@ backups/
 ui/node_modules/
 
 docs/superpowers/
+.bench/*

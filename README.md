@@ -572,7 +572,8 @@ Before deploying beyond localhost:
 - [ ] Conflict detection + auto-replace on contradiction
 - [ ] Embedding caching layer
 - [ ] Python client SDK
-- [ ] Benchmark suite: recall precision@K, cross-session retention, consolidation compression ratio
+- [x] Benchmark suite: recall@K, MRR, nDCG, latency — `npm run bench` (see [src/eval/README.md](src/eval/README.md))
+- [x] Proof suite: persistence, cross-harness portability (REST → MCP), task utility (cold vs warm LLM) — `npm run proof` (see [src/eval/proof/README.md](src/eval/proof/README.md))
 
 ## 📜 License
 

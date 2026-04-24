@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "name": "task-eval-starter",
+    "version": "0.1.0",
+    "description": "End-to-end task utility: questions whose correct answers require facts from memories seeded by the starter dataset. Each task specifies the bench_ids of memories required, the key facts that must appear in a good answer, and a pass criterion."
+  },
+  "tasks": [
+    {
+      "task_id": "t_01",
+      "prompt": "What is the API rate limit on the free tier?",
+      "requires_memories": ["m_01"],
+      "must_include": ["1000", "per minute"],
+      "ideal": "The free tier rate limit is 1000 requests per minute."
+    },
+    {
+      "task_id": "t_02",
+      "prompt": "Which PostgreSQL version are we running in production?",
+      "requires_memories": ["m_02"],
+      "must_include": ["16"],
+      "ideal": "PostgreSQL 16."
+    },
+    {
+      "task_id": "t_03",
+      "prompt": "Where should we store production secrets, and where should we NOT store them?",
+      "requires_memories": ["m_03"],
+      "must_include": ["AWS Secrets Manager", ".env"],
+      "ideal": "Production secrets belong in AWS Secrets Manager. Never commit them in .env files to git."
+    },
+    {
+      "task_id": "t_04",
+      "prompt": "Give me the steps to deploy to staging.",
+      "requires_memories": ["m_11"],
+      "must_include": ["npm test", "push", "main", "staging.example.com"],
+      "ideal": "Run npm test, push to main, watch the GitHub Actions pipeline, then smoke-test staging.example.com."
+    },
+    {
+      "task_id": "t_05",
+      "prompt": "How do I roll back a bad deploy?",
+      "requires_memories": ["m_12"],
+      "must_include": ["rollback.yml", "sha"],
+      "ideal": "Find the last green build SHA, then run `gh workflow run rollback.yml -f sha=<SHA>`."
+    },
+    {
+      "task_id": "t_06",
+      "prompt": "What caused the April 15 production outage and how long did it last?",
+      "requires_memories": ["m_22"],
+      "must_include": ["migration", "users", "11"],
+      "ideal": "A bad database migration locked the users table for 11 minutes."
+    },
+    {
+      "task_id": "t_07",
+      "prompt": "What testing frameworks does the team use for unit and end-to-end tests?",
+      "requires_memories": ["m_05"],
+      "must_include": ["Vitest", "Playwright"],
+      "ideal": "Vitest for unit tests, Playwright for end-to-end."
+    },
+    {
+      "task_id": "t_08",
+      "prompt": "Who joined the team recently, and what are they working on?",
+      "requires_memories": ["m_23"],
+      "must_include": ["Jordan", "data pipeline"],
+      "ideal": "Jordan joined about two weeks ago and is ramping up on the data pipeline, shadowing Sam on scheduler work."
+    },
+    {
+      "task_id": "t_09",
+      "prompt": "What architectural decision did we make about the public API in Q3 planning?",
+      "requires_memories": ["m_21"],
+      "must_include": ["GraphQL", "REST"],
+      "ideal": "Migrate from REST to GraphQL for the public API, targeting Q4 rollout."
+    },
+    {
+      "task_id": "t_10",
+      "prompt": "How do I set up a new local dev environment from scratch?",
+      "requires_memories": ["m_13"],
+      "must_include": ["git clone", "npm install", "npm run dev", "Docker"],
+      "ideal": "Git clone the repo, run npm install, run npm run dev. Docker is required for Postgres/Redis."
+    },
+    {
+      "task_id": "t_11",
+      "prompt": "How does the company handle payments?",
+      "requires_memories": ["m_35"],
+      "must_include": ["Stripe", "webhook"],
+      "ideal": "Stripe handles payment processing; we reconcile via webhook events against our internal ledger."
+    },
+    {
+      "task_id": "t_12",
+      "prompt": "What commit message convention do we use, and is it enforced?",
+      "requires_memories": ["m_33"],
+      "must_include": ["conventional commits", "commitlint"],
+      "ideal": "We use conventional commits (feat:, fix:, chore:) and commitlint enforces them in CI."
+    }
+  ]
+}

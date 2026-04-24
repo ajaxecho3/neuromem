@@ -1,0 +1,424 @@
+{
+  "meta": {
+    "name": "starter",
+    "version": "0.1.0",
+    "description": "Realistic engineering-team memories — facts, procedures, events, feelings, and current-task scratchpad. 40 memories, 20 queries across easy/medium/hard difficulties."
+  },
+  "memories": [
+    {
+      "bench_id": "m_01",
+      "content": "The API rate limit is 1000 requests per minute for the free tier.",
+      "type": "semantic",
+      "tags": ["api", "limits"],
+      "importance": 0.8
+    },
+    {
+      "bench_id": "m_02",
+      "content": "PostgreSQL is our primary database. We are on version 16 in production.",
+      "type": "semantic",
+      "tags": ["database", "postgres"],
+      "importance": 0.75
+    },
+    {
+      "bench_id": "m_03",
+      "content": "All production secrets are stored in AWS Secrets Manager. Never put credentials in .env files checked into git.",
+      "type": "semantic",
+      "tags": ["security", "secrets", "aws"],
+      "importance": 0.9
+    },
+    {
+      "bench_id": "m_04",
+      "content": "The build pipeline runs on GitHub Actions. Workflow definitions live under .github/workflows.",
+      "type": "semantic",
+      "tags": ["ci", "build"],
+      "importance": 0.6
+    },
+    {
+      "bench_id": "m_05",
+      "content": "The team uses Vitest for unit testing. Playwright covers end-to-end tests.",
+      "type": "semantic",
+      "tags": ["test", "vitest", "playwright"],
+      "importance": 0.7
+    },
+    {
+      "bench_id": "m_06",
+      "content": "Deployment targets are staging.example.com for pre-prod and prod.example.com for production.",
+      "type": "semantic",
+      "tags": ["deploy", "environments"],
+      "importance": 0.65
+    },
+    {
+      "bench_id": "m_07",
+      "content": "Node.js 20 LTS is the standard runtime for all backend services.",
+      "type": "semantic",
+      "tags": ["runtime", "node"],
+      "importance": 0.7
+    },
+    {
+      "bench_id": "m_08",
+      "content": "The on-call rotation is weekly and runs Monday to Sunday. PagerDuty owns the schedule.",
+      "type": "semantic",
+      "tags": ["oncall", "ops"],
+      "importance": 0.6
+    },
+    {
+      "bench_id": "m_09",
+      "content": "Code reviews require at least two approvals from senior engineers before merging to main.",
+      "type": "semantic",
+      "tags": ["review", "process"],
+      "importance": 0.7
+    },
+    {
+      "bench_id": "m_10",
+      "content": "TypeScript strict mode is enabled across all services. No implicit any, no unchecked indexed access.",
+      "type": "semantic",
+      "tags": ["typescript", "style"],
+      "importance": 0.65
+    },
+    {
+      "bench_id": "m_11",
+      "content": "How to deploy to staging: 1. Run npm test and confirm all pass  2. Push to main  3. Watch the GitHub Actions pipeline  4. Smoke-test staging.example.com",
+      "type": "procedural",
+      "tags": ["deploy", "howto"],
+      "importance": 0.85
+    },
+    {
+      "bench_id": "m_12",
+      "content": "To roll back a deployment: check the last green build SHA, then run `gh workflow run rollback.yml -f sha=<SHA>`.",
+      "type": "procedural",
+      "tags": ["deploy", "rollback", "howto"],
+      "importance": 0.8
+    },
+    {
+      "bench_id": "m_13",
+      "content": "Setting up local development: git clone the repo, run `npm install`, then `npm run dev`. Requires Docker for Postgres/Redis.",
+      "type": "procedural",
+      "tags": ["setup", "howto", "dev"],
+      "importance": 0.75
+    },
+    {
+      "bench_id": "m_14",
+      "content": "How to create a new database migration: run `npm run db:migrate:new <name>` which generates an up/down pair in db/migrations.",
+      "type": "procedural",
+      "tags": ["database", "migration", "howto"],
+      "importance": 0.6
+    },
+    {
+      "bench_id": "m_15",
+      "content": "Debugging production issues: start with the Datadog dashboards for error rates and latency, then pivot to Kibana for structured logs.",
+      "type": "procedural",
+      "tags": ["debug", "ops", "howto"],
+      "importance": 0.75
+    },
+    {
+      "bench_id": "m_16",
+      "content": "To reset the development database, run scripts/reset-db.sh. This drops and recreates all schemas, then reruns all migrations.",
+      "type": "procedural",
+      "tags": ["database", "dev", "howto"],
+      "importance": 0.5
+    },
+    {
+      "bench_id": "m_17",
+      "content": "Installing the Anthropic SDK: `npm install @anthropic-ai/sdk`. Set ANTHROPIC_API_KEY in the environment to use it.",
+      "type": "procedural",
+      "tags": ["anthropic", "sdk", "howto"],
+      "importance": 0.55
+    },
+    {
+      "bench_id": "m_18",
+      "content": "Deployed the new authentication service to staging yesterday afternoon. Smoke tests passed on the first try.",
+      "type": "episodic",
+      "tags": ["deploy", "auth"],
+      "importance": 0.7
+    },
+    {
+      "bench_id": "m_19",
+      "content": "Alex and I pair-programmed on the rate limiter last Tuesday. Landed the sliding-window implementation in four hours.",
+      "type": "episodic",
+      "tags": ["pairing", "ratelimit"],
+      "importance": 0.7
+    },
+    {
+      "bench_id": "m_20",
+      "content": "Sam discovered a memory leak in the scheduler last week — it was holding references to completed jobs. Patched in PR #482.",
+      "type": "episodic",
+      "tags": ["bug", "scheduler", "memory"],
+      "importance": 0.8
+    },
+    {
+      "bench_id": "m_21",
+      "content": "During the Q3 planning meeting we decided to migrate from REST to GraphQL for the public API. Target is Q4 rollout.",
+      "type": "episodic",
+      "tags": ["decision", "api", "graphql"],
+      "importance": 0.85
+    },
+    {
+      "bench_id": "m_22",
+      "content": "The prod outage on April 15 was caused by a bad database migration that locked the users table for 11 minutes.",
+      "type": "episodic",
+      "tags": ["incident", "database", "migration"],
+      "importance": 0.95
+    },
+    {
+      "bench_id": "m_23",
+      "content": "Jordan joined the team two weeks ago and is ramping up on the data pipeline. Currently shadowing Sam on scheduler work.",
+      "type": "episodic",
+      "tags": ["team", "onboarding"],
+      "importance": 0.65
+    },
+    {
+      "bench_id": "m_24",
+      "content": "Fixed the Chrome extension crash by upgrading to Manifest V3. Shipped in release v2.4.0.",
+      "type": "episodic",
+      "tags": ["bug", "chrome", "extension"],
+      "importance": 0.7
+    },
+    {
+      "bench_id": "m_25",
+      "content": "Frustrated with how long the CI pipeline takes — currently 18 minutes, it used to be 7. Something regressed after the Playwright addition.",
+      "type": "affective",
+      "tags": ["ci", "performance"],
+      "importance": 0.7,
+      "valence": "negative"
+    },
+    {
+      "bench_id": "m_26",
+      "content": "Really proud of how the team handled the April 15 incident. Communication was clear, rollback was fast, and the post-mortem was blameless.",
+      "type": "affective",
+      "tags": ["incident", "team"],
+      "importance": 0.75,
+      "valence": "positive"
+    },
+    {
+      "bench_id": "m_27",
+      "content": "Anxious about the upcoming security audit next month. The Secrets Manager migration isn't finished yet.",
+      "type": "affective",
+      "tags": ["security", "audit"],
+      "importance": 0.8,
+      "valence": "negative"
+    },
+    {
+      "bench_id": "m_28",
+      "content": "Grateful for Sam's help during the migration crunch. Stayed late three nights in a row to get it across the line.",
+      "type": "affective",
+      "tags": ["team", "gratitude"],
+      "importance": 0.6,
+      "valence": "positive"
+    },
+    {
+      "bench_id": "m_29",
+      "content": "Current task: refactoring the memory router to support the new multi-stage classifier. Aiming to finish this sprint.",
+      "type": "working",
+      "tags": ["wip", "router"],
+      "importance": 0.8
+    },
+    {
+      "bench_id": "m_30",
+      "content": "WIP: investigating why integration tests are flaky on Tuesdays specifically. Suspect a weekly cron job is racing with the test DB.",
+      "type": "working",
+      "tags": ["wip", "test", "flaky"],
+      "importance": 0.75
+    },
+    {
+      "bench_id": "m_31",
+      "content": "Remind me to book the team retro room for Friday afternoon.",
+      "type": "working",
+      "tags": ["todo", "retro"],
+      "importance": 0.4
+    },
+    {
+      "bench_id": "m_32",
+      "content": "Alex prefers concise code reviews with actionable feedback. Leave bikeshedding in a separate thread.",
+      "type": "semantic",
+      "tags": ["alex", "preferences", "review"],
+      "importance": 0.6
+    },
+    {
+      "bench_id": "m_33",
+      "content": "Our team agreed to use conventional commits (feat:, fix:, chore:) for all PRs. Enforced by commitlint in CI.",
+      "type": "semantic",
+      "tags": ["commits", "process"],
+      "importance": 0.55
+    },
+    {
+      "bench_id": "m_34",
+      "content": "The data platform uses Kafka for event streaming. Schema registry is managed via Confluent Cloud.",
+      "type": "semantic",
+      "tags": ["kafka", "events", "platform"],
+      "importance": 0.7
+    },
+    {
+      "bench_id": "m_35",
+      "content": "Payment processing is handled by Stripe. We use webhook-based reconciliation to keep our internal ledger in sync.",
+      "type": "semantic",
+      "tags": ["payments", "stripe"],
+      "importance": 0.8
+    },
+    {
+      "bench_id": "m_36",
+      "content": "The admin dashboard is built with React and TanStack Router. Backend API is an internal tRPC service.",
+      "type": "semantic",
+      "tags": ["admin", "react", "frontend"],
+      "importance": 0.55
+    },
+    {
+      "bench_id": "m_37",
+      "content": "We track KPIs in a weekly review every Thursday at 3pm. Metrics come from Looker dashboards.",
+      "type": "semantic",
+      "tags": ["process", "metrics"],
+      "importance": 0.5
+    },
+    {
+      "bench_id": "m_38",
+      "content": "The company engineering blog is at engineering.example.com. New posts go through tech-writing review first.",
+      "type": "semantic",
+      "tags": ["blog", "writing"],
+      "importance": 0.45
+    },
+    {
+      "bench_id": "m_39",
+      "content": "Jordan's preferred IDE is Neovim with the LazyVim distribution. Has a shared dotfiles repo.",
+      "type": "semantic",
+      "tags": ["jordan", "preferences", "ide"],
+      "importance": 0.4
+    },
+    {
+      "bench_id": "m_40",
+      "content": "The onboarding doc for new engineers lives at docs/onboarding.md. Covers setup, architecture, and the team Slack channels.",
+      "type": "semantic",
+      "tags": ["onboarding", "docs"],
+      "importance": 0.55
+    }
+  ],
+  "queries": [
+    {
+      "bench_id": "q_01",
+      "query": "what is the API rate limit",
+      "expected_ids": ["m_01"],
+      "difficulty": "easy",
+      "description": "direct keyword match"
+    },
+    {
+      "bench_id": "q_02",
+      "query": "how do I deploy",
+      "expected_ids": ["m_11"],
+      "difficulty": "easy",
+      "description": "direct keyword match, procedural intent"
+    },
+    {
+      "bench_id": "q_03",
+      "query": "who is on-call this week",
+      "expected_ids": ["m_08"],
+      "difficulty": "easy"
+    },
+    {
+      "bench_id": "q_04",
+      "query": "what programming language and runtime do we use",
+      "expected_ids": ["m_07", "m_10"],
+      "difficulty": "medium",
+      "description": "multi-answer, paraphrased"
+    },
+    {
+      "bench_id": "q_05",
+      "query": "where do we keep credentials and sensitive config",
+      "expected_ids": ["m_03"],
+      "difficulty": "medium",
+      "description": "paraphrase: credentials → secrets"
+    },
+    {
+      "bench_id": "q_06",
+      "query": "rolling back a bad deploy",
+      "expected_ids": ["m_12"],
+      "difficulty": "medium"
+    },
+    {
+      "bench_id": "q_07",
+      "query": "what caused the April outage",
+      "expected_ids": ["m_22"],
+      "difficulty": "medium",
+      "description": "retrieval over incident content"
+    },
+    {
+      "bench_id": "q_08",
+      "query": "pair programming sessions",
+      "expected_ids": ["m_19"],
+      "difficulty": "medium"
+    },
+    {
+      "bench_id": "q_09",
+      "query": "memory leak",
+      "expected_ids": ["m_20"],
+      "difficulty": "easy"
+    },
+    {
+      "bench_id": "q_10",
+      "query": "what testing tools do we use",
+      "expected_ids": ["m_05"],
+      "difficulty": "medium"
+    },
+    {
+      "bench_id": "q_11",
+      "query": "who's new on the team",
+      "expected_ids": ["m_23"],
+      "difficulty": "hard",
+      "description": "requires understanding 'new' → recently joined"
+    },
+    {
+      "bench_id": "q_12",
+      "query": "what am I working on right now",
+      "expected_ids": ["m_29", "m_30"],
+      "difficulty": "hard",
+      "description": "vague, needs type:working intent"
+    },
+    {
+      "bench_id": "q_13",
+      "query": "our CI is too slow",
+      "expected_ids": ["m_25"],
+      "difficulty": "hard",
+      "description": "affective paraphrase"
+    },
+    {
+      "bench_id": "q_14",
+      "query": "team members' preferences",
+      "expected_ids": ["m_32", "m_39"],
+      "difficulty": "medium"
+    },
+    {
+      "bench_id": "q_15",
+      "query": "how do I set up a new dev machine",
+      "expected_ids": ["m_13"],
+      "difficulty": "medium"
+    },
+    {
+      "bench_id": "q_16",
+      "query": "everything about our database",
+      "expected_ids": ["m_02", "m_14", "m_16"],
+      "difficulty": "hard",
+      "description": "multi-answer, very broad query"
+    },
+    {
+      "bench_id": "q_17",
+      "query": "what did we decide about the API architecture",
+      "expected_ids": ["m_21"],
+      "difficulty": "medium"
+    },
+    {
+      "bench_id": "q_18",
+      "query": "how do we handle payments",
+      "expected_ids": ["m_35"],
+      "difficulty": "medium"
+    },
+    {
+      "bench_id": "q_19",
+      "query": "recent bugs and incidents",
+      "expected_ids": ["m_22", "m_24"],
+      "difficulty": "hard"
+    },
+    {
+      "bench_id": "q_20",
+      "query": "build pipeline",
+      "expected_ids": ["m_04"],
+      "difficulty": "easy"
+    }
+  ]
+}

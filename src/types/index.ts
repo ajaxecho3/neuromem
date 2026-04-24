@@ -68,7 +68,7 @@ export interface RecallQuery {
 
 export interface RecallResult {
   memories: Memory[];
-  strategy: "vector" | "keyword" | "temporal" | "graph" | "hybrid";
+  strategy: "vector" | "keyword" | "temporal" | "graph" | "hybrid" | "rrf";
   scanned: number;
 }
 

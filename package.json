@@ -18,7 +18,13 @@
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f neuromem",
-    "docker:reset": "docker compose down -v && docker compose up -d"
+    "docker:reset": "docker compose down -v && docker compose up -d",
+    "bench": "tsx src/eval/bench.ts",
+    "bench:quiet": "tsx src/eval/bench.ts --quiet",
+    "proof": "tsx src/eval/proof/run-all.ts",
+    "proof:persist": "tsx src/eval/proof/persistence.ts",
+    "proof:xharness": "tsx src/eval/proof/cross-harness.ts",
+    "proof:tasks": "tsx src/eval/proof/task-eval.ts"
   },
   "keywords": [
     "mcp",
