@@ -7,6 +7,8 @@ import { ImportanceBar } from "../components/ImportanceBar";
 import { AgentSelector } from "../components/AgentSelector";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { EmptyState } from "../components/EmptyState";
+import { StatsStrip } from "../components/StatsStrip";
+import { ProjectedSavings } from "../components/ProjectedSavings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -232,6 +234,12 @@ export function MemoryBrowser() {
         <h1 className="font-display text-2xl text-foreground">Memories</h1>
         <Button onClick={() => setShowCreate(true)}>+ New Memory</Button>
       </div>
+
+      {/* Headline numbers: total stored + last-bench token savings */}
+      <StatsStrip />
+
+      {/* How savings grow as the memory store grows */}
+      <ProjectedSavings />
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3 mb-3">

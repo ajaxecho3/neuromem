@@ -45,6 +45,23 @@ export function printReport(report: BenchReport, baseline?: BenchReport): void {
   printLatencyRow("latency p95", s.latency_p95_ms, b?.latency_p95_ms);
   console.log();
 
+  // ─── Token economics ───────────────────────────────────────────
+  // The headline "NeuroMem actually saves tokens" number. Baseline here =
+  // naive "stuff every memory into context"; NeuroMem = top-k recalled.
+  const t = s.tokens;
+  const tb = b?.tokens;
+  const encodingNote = t.estimated
+    ? `${DIM}(heuristic — tiktoken unavailable)${RESET}`
+    : `${DIM}(${t.encoding})${RESET}`;
+  console.log(`${BOLD}Token economics${RESET} ${encodingNote}`);
+  printIntRow("baseline total", t.baseline_total, tb?.baseline_total, false);
+  printIntRow("NeuroMem total", t.neuromem_total, tb?.neuromem_total, false);
+  printIntRow("saved total", t.saved_total, tb?.saved_total, true);
+  printPctRow("reduction", t.reduction_pct, tb?.reduction_pct);
+  printIntRow("baseline / query", Math.round(t.baseline_mean), tb ? Math.round(tb.baseline_mean) : undefined, false);
+  printIntRow("NeuroMem / query", Math.round(t.neuromem_mean), tb ? Math.round(tb.neuromem_mean) : undefined, false);
+  console.log();
+
   // ─── By difficulty ────────────────────────────────────────────
   const difficultyKeys = Object.keys(s.by_difficulty);
   if (difficultyKeys.length > 0) {
@@ -133,6 +150,59 @@ function printLatencyRow(
   console.log(
     `${row}${color}${sign}${delta.toFixed(1)}ms${RESET} ${DIM}vs baseline ${baseline.toFixed(1)}ms${RESET}`,
   );
+}
+
+/**
+ * Render an integer metric (e.g. token count). If `bigger_is_better` is true,
+ * positive deltas color green; otherwise positive deltas color red (we used
+ * more tokens than baseline run — a regression).
+ */
+function printIntRow(
+  label: string,
+  value: number,
+  baseline: number | undefined,
+  bigger_is_better: boolean,
+): void {
+  const row = `  ${pad(label, 18)}${pad(formatInt(value), 12)}`;
+  if (baseline === undefined) {
+    console.log(row);
+    return;
+  }
+  const delta = value - baseline;
+  const sign = delta >= 0 ? "+" : "";
+  const good = bigger_is_better ? delta > 0 : delta < 0;
+  const bad = bigger_is_better ? delta < 0 : delta > 0;
+  const color = good ? GREEN : bad ? RED : DIM;
+  console.log(
+    `${row}${color}${sign}${formatInt(delta)}${RESET} ${DIM}vs baseline ${formatInt(baseline)}${RESET}`,
+  );
+}
+
+/** Render a percentage (0..1) metric with a % suffix. Bigger is always better here. */
+function printPctRow(
+  label: string,
+  value: number,
+  baseline: number | undefined,
+): void {
+  const row = `  ${pad(label, 18)}${pad(formatPct(value), 12)}`;
+  if (baseline === undefined) {
+    console.log(row);
+    return;
+  }
+  const delta = value - baseline;
+  const sign = delta >= 0 ? "+" : "";
+  const color = delta > 0.005 ? GREEN : delta < -0.005 ? RED : DIM;
+  console.log(
+    `${row}${color}${sign}${formatPct(delta)}${RESET} ${DIM}vs baseline ${formatPct(baseline)}${RESET}`,
+  );
+}
+
+function formatInt(n: number): string {
+  return Math.round(n).toLocaleString();
+}
+
+function formatPct(n: number): string {
+  return `${(n * 100).toFixed(1)}%`;
 }
 
 function printBaselineVerdict(report: BenchReport, baseline: BenchReport): void {

@@ -5,8 +5,16 @@
  */
 
 import { Router, type Request, type Response } from "express";
+import { readdirSync, readFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
 import type { MemoryManager } from "../stores/MemoryManager.js";
 import type { Consolidator } from "../consolidation/Consolidator.js";
+import {
+  sumTokens,
+  isTokenizerFallback,
+  getActiveEncoding,
+} from "../utils/tokens.js";
+import type { BenchReport } from "../eval/types.js";
 
 export function createUiRouter(
   mgr: MemoryManager,
@@ -309,6 +317,52 @@ export function createUiRouter(
     }
   });
 
+  // GET /api/ui/stats
+  // Summary numbers for the MemoryBrowser stats strip:
+  //   - memory_count:    total memories across every agent
+  //   - tokens_stored:   tiktoken count of all memory content
+  //   - latest_bench:    headline token-savings from the most recent
+  //                      .bench/*.json run (null if none exist yet)
+  router.get("/stats", async (_req: Request, res: Response) => {
+    try {
+      const agents = await mgr.episodic.listAgents();
+      const perAgent = await Promise.all(
+        agents.map((aid) => mgr.listAll({ agent_id: aid })),
+      );
+      const all = perAgent.flat();
+      const tokens_stored = sumTokens(all.map((m) => m.content));
+
+      // Live savings pulled from the recall_stats table — cumulative, 24h,
+      // and 7d rollups. null-safe: fresh installs with zero recalls get a
+      // zero-count aggregate, which the UI renders as a "no recalls yet" hint.
+      const now = Date.now();
+      const [totals, window_24h, window_7d] = await Promise.all([
+        mgr.recallStats.getTotals(),
+        mgr.recallStats.getWindow(
+          new Date(now - 24 * 60 * 60 * 1000).toISOString(),
+        ),
+        mgr.recallStats.getWindow(
+          new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString(),
+        ),
+      ]);
+
+      ok(res, {
+        memory_count: all.length,
+        tokens_stored,
+        tokens_estimated: isTokenizerFallback(),
+        tokens_encoding: getActiveEncoding(),
+        latest_bench: readLatestBench(),
+        live_savings: {
+          totals,
+          window_24h,
+          window_7d,
+        },
+      });
+    } catch (e: unknown) {
+      fail(res, 500, e instanceof Error ? e.message : String(e));
+    }
+  });
+
   // GET /api/ui/cognition-log
   router.get("/cognition-log", async (_req: Request, res: Response) => {
     try {
@@ -330,4 +384,66 @@ export function createUiRouter(
   });
 
   return router;
+}
+
+/**
+ * Scan the .bench/ directory for the newest JSON report that contains a
+ * `tokens` summary block and return the headline savings numbers. Returns
+ * null if the directory is missing, empty, or contains only old reports
+ * without token accounting.
+ *
+ * We read lazily on each /stats request — benchmarks aren't fired often and
+ * the reports are small, so caching adds complexity for little win.
+ */
+function readLatestBench(): {
+  timestamp: string;
+  run_id: string;
+  dataset: string;
+  query_count: number;
+  baseline_total: number;
+  neuromem_total: number;
+  saved_total: number;
+  reduction_pct: number;
+  baseline_mean: number;
+  neuromem_mean: number;
+  saved_mean: number;
+  encoding: string;
+  estimated: boolean;
+} | null {
+  const benchDir = join(process.cwd(), ".bench");
+  if (!existsSync(benchDir)) return null;
+
+  const files = readdirSync(benchDir)
+    .filter((f) => f.endsWith(".json"))
+    // Sort by filename descending — our filenames are ISO timestamps so
+    // lexicographic ordering matches chronological ordering.
+    .sort((a, b) => b.localeCompare(a));
+
+  for (const file of files) {
+    try {
+      const raw = readFileSync(join(benchDir, file), "utf-8");
+      const report = JSON.parse(raw) as BenchReport;
+      if (!report.summary?.tokens) continue; // old report, skip
+      const t = report.summary.tokens;
+      return {
+        timestamp: report.timestamp,
+        run_id: report.run_id,
+        dataset: report.config.dataset_name,
+        query_count: report.config.query_count,
+        baseline_total: t.baseline_total,
+        neuromem_total: t.neuromem_total,
+        saved_total: t.saved_total,
+        reduction_pct: t.reduction_pct,
+        baseline_mean: t.baseline_mean,
+        neuromem_mean: t.neuromem_mean,
+        saved_mean: t.saved_mean,
+        encoding: t.encoding,
+        estimated: t.estimated,
+      };
+    } catch {
+      // Corrupt or partial file — skip and try the next newest.
+      continue;
+    }
+  }
+  return null;
 }

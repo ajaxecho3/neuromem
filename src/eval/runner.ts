@@ -31,6 +31,11 @@ import type {
   BenchSummary,
   QueryResult,
 } from "./types.js";
+import {
+  countTokens,
+  isTokenizerFallback,
+  getActiveEncoding,
+} from "../utils/tokens.js";
 
 const SEED_CONCURRENCY = 4;
 const INDEX_SETTLE_MS = 800;
@@ -66,6 +71,15 @@ export async function runBenchmark(
   log(`[bench] seeded ${seeded} memories. letting indexes settle...`);
   await sleep(INDEX_SETTLE_MS);
 
+  // ─── Pre-compute the naive-baseline token cost ──────────────────
+  // The "baseline" is the context an agent would need to send if it had no
+  // retrieval and just pasted every stored memory into the prompt. We count
+  // it once here (it's the same for every query) and reuse per row.
+  const baselineMemoryTokens = dataset.memories.reduce(
+    (acc, m) => acc + countTokens(m.content),
+    0,
+  );
+
   // ─── Query ────────────────────────────────────────────────────
   const perQuery: QueryResult[] = [];
   log(`[bench] running ${dataset.queries.length} queries...`);
@@ -89,6 +103,17 @@ export async function runBenchmark(
     const rr = reciprocalRank(q.expected_ids, returnedBenchIds);
     const nd = ndcgAtK(q.expected_ids, returnedBenchIds, 10);
 
+    // ─── Token accounting ──────────────────────────────────────
+    // Baseline cost = every memory stuffed into context + the query itself.
+    // NeuroMem cost = only the memories recall() returned + the query.
+    // We count the query text in both so we're comparing apples to apples.
+    const queryTokens = countTokens(q.query);
+    const tokensBaseline = baselineMemoryTokens + queryTokens;
+    const tokensNeuromem =
+      memories.reduce((acc, m) => acc + countTokens(m.content), 0) +
+      queryTokens;
+    const tokensSaved = tokensBaseline - tokensNeuromem;
+
     perQuery.push({
       query_id: q.bench_id,
       query_text: q.query,
@@ -101,6 +126,9 @@ export async function runBenchmark(
       ndcg_at_10: nd,
       latency_ms: round(latencyMs, 1),
       missed_ids: missed,
+      tokens_baseline: tokensBaseline,
+      tokens_neuromem: tokensNeuromem,
+      tokens_saved: tokensSaved,
     });
 
     // Stray ids that returned but weren't in the seed map get logged quietly
@@ -192,6 +220,14 @@ function summarize(results: QueryResult[]): BenchSummary {
     byDiff[key]!.mrr = round(mean(subset.map((r) => r.reciprocal_rank)), 4);
   }
 
+  // ─── Token aggregates ──────────────────────────────────────
+  const baselineSeries = results.map((r) => r.tokens_baseline);
+  const neuromemSeries = results.map((r) => r.tokens_neuromem);
+  const savedSeries = results.map((r) => r.tokens_saved);
+  const baselineTotal = baselineSeries.reduce((a, b) => a + b, 0);
+  const neuromemTotal = neuromemSeries.reduce((a, b) => a + b, 0);
+  const savedTotal = savedSeries.reduce((a, b) => a + b, 0);
+
   return {
     recall_at_5: round(mean(r5), 4),
     recall_at_10: round(mean(r10), 4),
@@ -201,6 +237,18 @@ function summarize(results: QueryResult[]): BenchSummary {
     latency_p50_ms: round(percentile(lat, 50), 1),
     latency_p95_ms: round(percentile(lat, 95), 1),
     by_difficulty: byDiff,
+    tokens: {
+      encoding: getActiveEncoding(),
+      estimated: isTokenizerFallback(),
+      baseline_total: baselineTotal,
+      neuromem_total: neuromemTotal,
+      saved_total: savedTotal,
+      reduction_pct:
+        baselineTotal === 0 ? 0 : round(savedTotal / baselineTotal, 4),
+      baseline_mean: round(mean(baselineSeries), 1),
+      neuromem_mean: round(mean(neuromemSeries), 1),
+      saved_mean: round(mean(savedSeries), 1),
+    },
   };
 }
 

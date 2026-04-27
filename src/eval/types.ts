@@ -61,6 +61,18 @@ export interface QueryResult {
   latency_ms: number;
   /** IDs that were expected but not returned. */
   missed_ids: string[];
+  /**
+   * Tokens the agent would have had to send to the LLM under the naive
+   * "stuff every memory into context" baseline, for this query.
+   */
+  tokens_baseline: number;
+  /**
+   * Tokens the agent actually sends to the LLM when using NeuroMem — just
+   * the top-k recalled memories plus the query itself.
+   */
+  tokens_neuromem: number;
+  /** tokens_baseline − tokens_neuromem. Positive means NeuroMem saved tokens. */
+  tokens_saved: number;
 }
 
 export interface BenchSummary {
@@ -77,6 +89,25 @@ export interface BenchSummary {
     recall_at_10: number;
     mrr: number;
   }>;
+  /** Token economics — headline proof that NeuroMem actually saves context. */
+  tokens: {
+    /** Encoding used for counting (e.g. "cl100k_base"). */
+    encoding: string;
+    /** True if the heuristic fallback was used instead of tiktoken. */
+    estimated: boolean;
+    /** Total tokens a naive agent would send across all queries (stuff-everything baseline). */
+    baseline_total: number;
+    /** Total tokens NeuroMem actually sent across all queries. */
+    neuromem_total: number;
+    /** baseline_total − neuromem_total. Positive means we saved tokens. */
+    saved_total: number;
+    /** saved_total / baseline_total, 0..1. 0 if baseline_total is 0. */
+    reduction_pct: number;
+    /** Per-query averages, handy for dashboards. */
+    baseline_mean: number;
+    neuromem_mean: number;
+    saved_mean: number;
+  };
 }
 
 export interface BenchReport {

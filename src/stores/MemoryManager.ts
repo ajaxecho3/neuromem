@@ -16,9 +16,15 @@ import { EpisodicStore } from "./EpisodicStore.js";
 import { SemanticStore } from "./SemanticStore.js";
 import { WorkingStore } from "./WorkingStore.js";
 import { AssociationStore } from "./AssociationStore.js";
+import { RecallStatsStore } from "./RecallStatsStore.js";
 import { MemoryRouter } from "../router/MemoryRouter.js";
 import type { InnerThought } from "../cognition/InnerThought.js";
 import { withRetention } from "../utils/retention.js";
+import {
+  countTokens,
+  sumTokens,
+  getActiveEncoding,
+} from "../utils/tokens.js";
 
 export class MemoryManager {
   constructor(
@@ -27,6 +33,7 @@ export class MemoryManager {
     public working: WorkingStore,
     public associations: AssociationStore,
     public router: MemoryRouter,
+    public recallStats: RecallStatsStore,
     public innerThought?: InnerThought,
   ) {}
 
@@ -35,11 +42,13 @@ export class MemoryManager {
     const semantic = new SemanticStore();
     const working = new WorkingStore();
     const associations = new AssociationStore();
+    const recallStats = new RecallStatsStore();
 
     await episodic.init();
     await semantic.init();
     await working.init();
     await associations.init();
+    await recallStats.init();
 
     return new MemoryManager(
       episodic,
@@ -47,6 +56,7 @@ export class MemoryManager {
       working,
       associations,
       new MemoryRouter(innerThought),
+      recallStats,
       innerThought,
     );
   }
@@ -56,6 +66,7 @@ export class MemoryManager {
       this.episodic.close(),
       this.working.close(),
       this.associations.close(),
+      this.recallStats.close(),
     ]);
   }
 
@@ -357,11 +368,59 @@ Respond with only the JSON array.`;
       .slice(0, query.limit ?? 10)
       .map((x) => x.mem);
 
-    return {
+    const result: RecallResult = {
       memories: ranked.map((m) => withRetention(m)),
       strategy: "rrf",
       scanned: flatResults.length,
     };
+
+    // ─── Fire-and-forget live metering ─────────────────────────
+    // We want a cumulative "tokens saved by NeuroMem" number backed by real
+    // production recalls, not the synthetic benchmark. The hot path has
+    // already produced `result` — we just queue the measurement and return.
+    // If metering fails (DB down, etc.) we log and move on; the user must
+    // never feel it.
+    void this.meterRecall(query, ranked).catch((err) => {
+      console.warn(
+        `[recall_stats] meter failed for agent=${query.agent_id}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    });
+
+    return result;
+  }
+
+  /**
+   * Compute baseline/neuromem token costs and insert one recall_stats row.
+   *
+   * The naive baseline is the cost of stuffing every memory the agent owns
+   * (plus shared memories, matching recall's default behaviour) into context
+   * alongside the query. NeuroMem cost is just the actually-returned set
+   * plus the same query.
+   *
+   * We listAll() across all stores here — it's O(N) in agent size, but this
+   * method runs detached from the user's request so it only shows up as
+   * background DB load, never as user-visible latency.
+   */
+  private async meterRecall(
+    query: RecallQuery,
+    returned: Memory[],
+  ): Promise<void> {
+    const all = await this.listAll({ agent_id: query.agent_id });
+    const queryTokens = countTokens(query.query);
+    const baselineTokens = sumTokens(all.map((m) => m.content)) + queryTokens;
+    const neuromemTokens =
+      sumTokens(returned.map((m) => m.content)) + queryTokens;
+
+    await this.recallStats.record({
+      agent_id: query.agent_id,
+      total_memory_count: all.length,
+      returned_memory_count: returned.length,
+      baseline_tokens: baselineTokens,
+      neuromem_tokens: neuromemTokens,
+      encoding: getActiveEncoding(),
+    });
   }
 
   // ─── ASSOCIATE ───────────────────────────────────────────────

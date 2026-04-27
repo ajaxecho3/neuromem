@@ -98,6 +98,33 @@ RETURNS VOID AS $$
     WHERE id = p_id;
 $$ LANGUAGE SQL;
 
+-- ─── Recall metering (live token-savings proof) ────────────────
+-- One row per recall() call. Used by the UI to show real, cumulative
+-- tokens NeuroMem has saved vs. the naive "stuff every memory into context"
+-- baseline — i.e. how the system earns its keep in production, as opposed
+-- to the synthetic benchmark numbers in .bench/*.json.
+--
+-- agent_id is intentionally not a FK to agents(id): we want metering to
+-- survive agent deletion (for lifetime analytics) and not couple the hot
+-- path to referential integrity.
+CREATE TABLE IF NOT EXISTS recall_stats (
+  id                     BIGSERIAL PRIMARY KEY,
+  agent_id               TEXT NOT NULL,
+  recalled_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+  total_memory_count     INTEGER NOT NULL,
+  returned_memory_count  INTEGER NOT NULL,
+  baseline_tokens        INTEGER NOT NULL,
+  neuromem_tokens        INTEGER NOT NULL,
+  saved_tokens           INTEGER NOT NULL
+                         GENERATED ALWAYS AS (baseline_tokens - neuromem_tokens) STORED,
+  encoding               TEXT NOT NULL DEFAULT 'cl100k_base'
+);
+
+CREATE INDEX IF NOT EXISTS idx_recall_stats_agent_time
+  ON recall_stats (agent_id, recalled_at DESC);
+CREATE INDEX IF NOT EXISTS idx_recall_stats_time
+  ON recall_stats (recalled_at DESC);
+
 -- ─── Memory versions (versioning feature) ───────────────────────
 -- Stores previous versions of episodic memories before update/replace.
 CREATE TABLE IF NOT EXISTS memory_versions (
