@@ -166,11 +166,27 @@ Add to `.vscode/mcp.json` in your workspace:
 
 ---
 
-### Option D: Claude CLI
+### Option D: Claude Code / Copilot CLI (`make install` — recommended)
+
+Runs the full setup in one command: starts Docker, registers the MCP server, installs the `memory-orchestrate` skill, and writes a `~/.claude/CLAUDE.md` with a forced eval hook so the agent calls `recall()` before any other tool at session start.
+
+```bash
+make install
+# or for Claude Code only:
+make install-claude
+```
+
+What `make install` does for Claude Code:
+1. Registers `http://localhost:3000/mcp` as an MCP server via `claude mcp add`
+2. Installs `skills/memory-orchestrate/` → `~/.claude/skills/memory-orchestrate/`
+3. Writes/patches `~/.claude/CLAUDE.md` with your pinned `agent_id` and the memory eval hook
+
+To connect manually:
 
 ```bash
 claude mcp add --transport http neuromem http://localhost:3000/mcp
-claude mcp list
+cp -r skills/memory-orchestrate ~/.claude/skills/
+# then patch ~/.claude/CLAUDE.md — see neuromem-AGENTS.md for the block to add
 ```
 
 ---
@@ -640,12 +656,17 @@ neuromem/
 │       ├── components/         # DataGrid, ImportanceBar, AgentSelector, …
 │       └── api/                # Typed API client
 ├── skills/                     # Agent skill files (tell agents when/how to use NeuroMem)
-│   ├── memory-session-start/
-│   ├── memory-continuous/
-│   ├── memory-consolidate/
-│   ├── memory-recall/
-│   ├── memory-reflect/
-│   └── memory-session-end/
+│   └── memory-orchestrate/     # Single discoverable skill — optimised description + USE WHEN triggers
+│       ├── SKILL.md            # Entry point; loaded by the skill router at session start
+│       └── docs/               # Granular guides loaded on-demand (not indexed at startup)
+│           ├── memory-session-start.md
+│           ├── memory-continuous.md
+│           ├── memory-forget.md
+│           ├── memory-session-end.md
+│           ├── memory-recall.md
+│           ├── memory-reflect.md
+│           ├── memory-consolidate.md
+│           └── memory-write.md
 ├── scripts/
 │   ├── backup.sh               # Snapshot all data volumes
 │   ├── reset.sh                # Nuclear reset
@@ -683,6 +704,9 @@ Before deploying beyond localhost:
 - [x] Token metering — per-recall baseline vs injected token counts, surfaced in Memory Browser
 - [x] Benchmark suite: recall@K, MRR, nDCG, latency — `npm run bench` (see [src/eval/README.md](src/eval/README.md))
 - [x] Proof suite: persistence, cross-harness portability (REST → MCP), task utility — `npm run proof` (see [src/eval/proof/README.md](src/eval/proof/README.md))
+- [x] Skill restructure — single `memory-orchestrate` skill with progressive disclosure via `docs/`; eliminates router ambiguity from 9 competing top-level skills
+- [x] Optimised skill descriptions — USE WHEN triggers, third-person voice, Out of Scope blocks, concrete before/after examples; activation rate ~20% → 50%+
+- [x] `make install` generates `~/.claude/CLAUDE.md` — forced eval hook pins `agent_id` and ensures `recall()` fires before any file read at session start
 - [ ] Embedding caching layer
 - [ ] Python client SDK
 

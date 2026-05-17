@@ -267,34 +267,18 @@ install_claude_code() {
   SKILL_DIR="${HOME}/.claude/skills"
   mkdir -p "$SKILL_DIR"
 
-  # Install the main bundled skill
-  if [[ -f "$PROJECT_DIR/neuromem-v2.skill" ]]; then
-    cp "$PROJECT_DIR/neuromem-v2.skill" "$SKILL_DIR/neuromem.skill"
-    ok "Skill installed → $SKILL_DIR/neuromem.skill"
-  elif [[ -f "$PROJECT_DIR/neuromem.skill" ]]; then
-    cp "$PROJECT_DIR/neuromem.skill" "$SKILL_DIR/neuromem.skill"
-    ok "Skill installed → $SKILL_DIR/neuromem.skill"
+  # Install memory-orchestrate as the single discoverable skill.
+  # The 9 granular skills live inside memory-orchestrate/docs/ and are
+  # referenced on-demand — they are NOT installed as top-level skills to
+  # avoid router ambiguity and wasted token budget at session start.
+  ORCHESTRATE_SRC="$PROJECT_DIR/skills/memory-orchestrate"
+  if [[ -d "$ORCHESTRATE_SRC" ]]; then
+    ORCHESTRATE_DEST="${SKILL_DIR}/memory-orchestrate"
+    rm -rf "$ORCHESTRATE_DEST"
+    cp -r "$ORCHESTRATE_SRC" "$ORCHESTRATE_DEST"
+    ok "memory-orchestrate skill installed → $ORCHESTRATE_DEST"
   else
-    warn "neuromem.skill not found — skipping bundled skill install"
-  fi
-
-  # Install the 9 granular skills from skills/ folder
-  GRANULAR_SKILLS_DIR="$PROJECT_DIR/skills"
-  if [[ -d "$GRANULAR_SKILLS_DIR" ]]; then
-    local installed_count=0
-    for skill_dir in "$GRANULAR_SKILLS_DIR"/*/; do
-      skill_name=$(basename "$skill_dir")
-      skill_md="${skill_dir}SKILL.md"
-      if [[ -f "$skill_md" ]]; then
-        dest_dir="${SKILL_DIR}/${skill_name}"
-        mkdir -p "$dest_dir"
-        cp "$skill_md" "${dest_dir}/SKILL.md"
-        installed_count=$((installed_count + 1))
-      fi
-    done
-    ok "$installed_count granular skills installed → $SKILL_DIR/"
-  else
-    warn "skills/ folder not found — skipping granular skill install"
+    warn "skills/memory-orchestrate not found — skipping skill install"
   fi
 
   # 2. Register MCP server in Claude Code
@@ -319,6 +303,68 @@ EOF
     fi
   else
     _patch_json_mcp "$CLAUDE_CONFIG" "neuromem" "$MCP_ENTRY"
+  fi
+
+  # 3. Write/patch ~/.claude/CLAUDE.md with forced memory eval hook + pinned agent_id
+  GLOBAL_CLAUDE_MD="${HOME}/.claude/CLAUDE.md"
+  NEUROMEM_START_MARKER="<!-- NeuroMem Memory Directive -->"
+  NEUROMEM_END_MARKER="<!-- End NeuroMem Memory Directive -->"
+
+  CLAUDE_MD_BLOCK="${NEUROMEM_START_MARKER}
+## Memory (NeuroMem)
+
+Your agent_id for all memory calls is: **${AGENT_ID}**
+
+Before making any other tool call at the start of a session, evaluate:
+> \"Have I called recall() yet this session?\"
+If the answer is no — call it now using the topic from the user's opening message.
+
+Rules:
+- recall() runs FIRST, before Read, Glob, Grep, WebSearch, or any other tool
+- remember() whenever the user states a preference, fact, constraint, or decision
+- forget() then remember() when the user corrects something
+- reflect() + consolidate() at session end when warranted
+- Never announce memory tool calls to the user
+${NEUROMEM_END_MARKER}"
+
+  mkdir -p "$(dirname "$GLOBAL_CLAUDE_MD")"
+
+  if [[ -f "$GLOBAL_CLAUDE_MD" ]] && grep -qF "$NEUROMEM_START_MARKER" "$GLOBAL_CLAUDE_MD"; then
+    # Replace existing block using python3 (safer than sed for multiline)
+    python3 - "$GLOBAL_CLAUDE_MD" "$AGENT_ID" <<'PYEOF'
+import sys, re
+filepath, agent_id = sys.argv[1], sys.argv[2]
+with open(filepath) as f:
+    content = f.read()
+block = (
+    "<!-- NeuroMem Memory Directive -->\n"
+    "## Memory (NeuroMem)\n\n"
+    f"Your agent_id for all memory calls is: **{agent_id}**\n\n"
+    "Before making any other tool call at the start of a session, evaluate:\n"
+    '> "Have I called recall() yet this session?"\n'
+    "If the answer is no — call it now using the topic from the user's opening message.\n\n"
+    "Rules:\n"
+    "- recall() runs FIRST, before Read, Glob, Grep, WebSearch, or any other tool\n"
+    "- remember() whenever the user states a preference, fact, constraint, or decision\n"
+    "- forget() then remember() when the user corrects something\n"
+    "- reflect() + consolidate() at session end when warranted\n"
+    "- Never announce memory tool calls to the user\n"
+    "<!-- End NeuroMem Memory Directive -->"
+)
+new = re.sub(
+    r'<!-- NeuroMem Memory Directive -->.*?<!-- End NeuroMem Memory Directive -->',
+    block, content, flags=re.DOTALL
+)
+with open(filepath, 'w') as f:
+    f.write(new)
+PYEOF
+    ok "CLAUDE.md memory directive updated (agent_id: ${AGENT_ID})"
+  elif [[ -f "$GLOBAL_CLAUDE_MD" ]]; then
+    printf '\n%s\n' "$CLAUDE_MD_BLOCK" >> "$GLOBAL_CLAUDE_MD"
+    ok "CLAUDE.md memory directive appended → $GLOBAL_CLAUDE_MD"
+  else
+    printf '%s\n' "$CLAUDE_MD_BLOCK" > "$GLOBAL_CLAUDE_MD"
+    ok "CLAUDE.md created with memory directive → $GLOBAL_CLAUDE_MD"
   fi
 
   CONNECTED+=("Claude Code")
@@ -619,8 +665,9 @@ echo -e "  make backup    → back up all memory data"
 echo -e "  make reset     → wipe all data and start fresh"
 echo ""
 echo -e "  ${BOLD}To connect a tool manually:${RESET}"
-echo -e "  Claude Code   →  cp neuromem.skill ~/.claude/skills/"
+echo -e "  Claude Code   →  cp -r skills/memory-orchestrate ~/.claude/skills/"
 echo -e "                   claude mcp add neuromem --transport sse ${NEUROMEM_SSE_URL}"
+echo -e "                   (also patch ~/.claude/CLAUDE.md with the memory directive)"
 echo -e "  OpenCode      →  add to ~/.config/opencode/config.json under \"mcp\""
 echo -e "                   cp neuromem-AGENTS.md ./AGENTS.md"
 echo -e "  Cursor        →  cp neuromem-cursorrules.txt .cursorrules"
