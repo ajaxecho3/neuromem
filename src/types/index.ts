@@ -34,6 +34,13 @@ export interface Memory {
   shared: boolean;
   associations?: string[];
   derived_from?: string[];
+  // ── Staleness tracking ───────────────────────────────────────
+  /** Relative path of the source file this memory was extracted from */
+  source_file?: string;
+  /** SHA-256 (first 12 chars) of source_file content at time of analysis */
+  source_hash?: string;
+  /** ISO timestamp of when the analysis that produced this memory ran */
+  analyzed_at?: string;
 }
 
 export interface WriteMemoryInput {
@@ -53,6 +60,13 @@ export interface WriteMemoryInput {
   session_id?: string;
   ttl_seconds?: number; // for working memory
   topic?: string;
+  // ── Staleness tracking ───────────────────────────────────────
+  /** Relative path of the source file this memory was extracted from */
+  source_file?: string;
+  /** SHA-256 (first 12 chars) of source_file at time of analysis */
+  source_hash?: string;
+  /** ISO timestamp of the analysis run that produced this memory */
+  analyzed_at?: string;
 }
 
 export interface RecallQuery {

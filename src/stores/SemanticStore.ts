@@ -71,6 +71,9 @@ export class SemanticStore {
       topic: input.topic ?? "",
       created_by: input.created_by ?? "",
       session_id: input.session_id ?? "",
+      source_file: input.source_file ?? "",
+      source_hash: input.source_hash ?? "",
+      analyzed_at: input.analyzed_at ?? "",
     };
 
     await collection.add({
@@ -97,6 +100,9 @@ export class SemanticStore {
       tags: input.tags ?? [],
       source: input.source,
       shared: metadata.shared,
+      source_file: input.source_file,
+      source_hash: input.source_hash,
+      analyzed_at: input.analyzed_at,
     };
   }
 
@@ -172,6 +178,9 @@ export class SemanticStore {
             tags: meta.tags ? String(meta.tags).split(",").filter(Boolean) : [],
             source: meta.source || undefined,
             shared: meta.shared,
+            source_file: meta.source_file || undefined,
+            source_hash: meta.source_hash || undefined,
+            analyzed_at: meta.analyzed_at || undefined,
           },
         });
       }
@@ -237,6 +246,9 @@ export class SemanticStore {
           tags: meta.tags ? String(meta.tags).split(",").filter(Boolean) : [],
           source: meta.source || undefined,
           shared: Boolean(meta.shared),
+          source_file: meta.source_file || undefined,
+          source_hash: meta.source_hash || undefined,
+          analyzed_at: meta.analyzed_at || undefined,
         });
       }
     }
@@ -355,6 +367,9 @@ export class SemanticStore {
         tags: meta.tags ? String(meta.tags).split(",").filter(Boolean) : [],
         source: meta.source || undefined,
         shared: Boolean(meta.shared),
+        source_file: meta.source_file || undefined,
+        source_hash: meta.source_hash || undefined,
+        analyzed_at: meta.analyzed_at || undefined,
       };
     } catch {
       return null;

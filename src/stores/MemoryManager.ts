@@ -25,6 +25,7 @@ import {
   sumTokens,
   getActiveEncoding,
 } from "../utils/tokens.js";
+import { checkStaleness } from "../cognition/StalenessChecker.js";
 
 export class MemoryManager {
   constructor(
@@ -584,7 +585,7 @@ Respond with only the JSON array, no other text.`;
   async buildContext(
     query: string,
     agent_id = "default",
-    opts: { limit?: number; context_budget?: number; model?: string } | number = {},
+    opts: { limit?: number; context_budget?: number; model?: string; project_root?: string } | number = {},
   ): Promise<{
     context: string;
     memories: Memory[];
@@ -595,11 +596,14 @@ Respond with only the JSON array, no other text.`;
       tokens_used: number;
       budget_exhausted: boolean;
       over_budget_warning?: boolean;
+      stale_files: string[];
+      stale_count: number;
+      fresh_count: number;
     };
   }> {
     // Back-compat: old callers pass limit as a plain number
-    const { limit = 8, context_budget, model } =
-      typeof opts === "number" ? { limit: opts, context_budget: undefined, model: undefined } : opts;
+    const { limit = 8, context_budget, model, project_root } =
+      typeof opts === "number" ? { limit: opts, context_budget: undefined, model: undefined, project_root: undefined } : opts;
 
     // Clamp budget to a safe range; 0 or negative → return empty
     const budget = context_budget !== undefined
@@ -611,7 +615,7 @@ Respond with only the JSON array, no other text.`;
         context: "",
         memories: [],
         token_estimate: 0,
-        metadata: { total_candidates: 0, injected_count: 0, tokens_used: 0, budget_exhausted: true },
+        metadata: { total_candidates: 0, injected_count: 0, tokens_used: 0, budget_exhausted: true, stale_files: [], stale_count: 0, fresh_count: 0 },
       };
     }
 
@@ -620,12 +624,38 @@ Respond with only the JSON array, no other text.`;
     const result = await this.recall({ query, agent_id, limit: fetchLimit });
     const candidates = result.memories;
 
-    if (candidates.length === 0) {
+    // ─── Staleness check ──────────────────────────────────────
+    // If project_root is provided, exclude memories whose source file has
+    // changed or been deleted. Unknown memories (no source_hash) are treated
+    // as fresh conservatively so legacy memories are not silently dropped.
+    let validCandidates = candidates;
+    let staleFiles: string[] = [];
+    let staleCount = 0;
+
+    if (project_root && candidates.length > 0) {
+      try {
+        const stalenessReport = await checkStaleness(candidates, project_root);
+        validCandidates = [...stalenessReport.fresh, ...stalenessReport.unknown];
+        staleFiles = stalenessReport.stale_files;
+        staleCount = stalenessReport.stale.length;
+        if (staleCount > 0) {
+          console.log(
+            `[MemoryManager] Staleness check: ${stalenessReport.fresh.length} fresh, ` +
+            `${stalenessReport.unknown.length} unknown, ${staleCount} stale — ` +
+            `excluded files: ${staleFiles.join(", ")}`,
+          );
+        }
+      } catch (err) {
+        console.warn("[MemoryManager] Staleness check failed — using all candidates:", err);
+      }
+    }
+
+    if (validCandidates.length === 0) {
       return {
         context: "",
         memories: [],
         token_estimate: 0,
-        metadata: { total_candidates: 0, injected_count: 0, tokens_used: 0, budget_exhausted: false },
+        metadata: { total_candidates: candidates.length, injected_count: 0, tokens_used: 0, budget_exhausted: false, stale_files: staleFiles, stale_count: staleCount, fresh_count: 0 },
       };
     }
 
@@ -633,7 +663,7 @@ Respond with only the JSON array, no other text.`;
     const LAMBDA = 0.05; // recency decay rate (~14-day half-life)
     const now = Date.now();
 
-    const scored = candidates.map((m, rank) => {
+    const scored = validCandidates.map((m, rank) => {
       // Rank relevance: exponential decay so rank-0 = 1.0, rank-5 ≈ 0.22
       const rank_relevance = Math.exp(-0.3 * rank);
 
@@ -705,6 +735,9 @@ Respond with only the JSON array, no other text.`;
           injected_count: 0,
           tokens_used: 0,
           budget_exhausted: false,
+          stale_files: staleFiles,
+          stale_count: staleCount,
+          fresh_count: validCandidates.length,
         },
       };
     }
@@ -722,6 +755,9 @@ Respond with only the JSON array, no other text.`;
         tokens_used: tokensUsed,
         budget_exhausted: budgetExhausted,
         ...(overBudgetWarning ? { over_budget_warning: true } : {}),
+        stale_files: staleFiles,
+        stale_count: staleCount,
+        fresh_count: validCandidates.length,
       },
     };
   }

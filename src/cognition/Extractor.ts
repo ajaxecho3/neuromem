@@ -15,6 +15,7 @@
 import type { MemoryManager } from "../stores/MemoryManager.js";
 import type { InnerThought } from "./InnerThought.js";
 import type { WriteMemoryInput, MemoryType } from "../types/index.js";
+import { hashFromRelative, detectProjectRootAsync } from "../utils/SourceHasher.js";
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -23,6 +24,7 @@ interface ExtractedItem {
   type: MemoryType;
   importance: number;
   tags: string[];
+  source_file?: string | null;
 }
 
 export interface ExtractionResult {
@@ -65,13 +67,14 @@ function buildExtractionPrompt(
 Given the conversation turn below, identify facts, decisions, preferences, or context that would be genuinely useful to remember in future sessions.
 
 Return ONLY a JSON array — no explanation, no markdown, no wrapper. Each item must have:
-  { "content": string, "type": "episodic"|"semantic"|"procedural"|"affective"|"working", "importance": 0.0-1.0, "tags": string[] }
+  { "content": string, "type": "episodic"|"semantic"|"procedural"|"affective"|"working", "importance": 0.0-1.0, "tags": string[], "source_file": string|null }
 
 Rules:
 - Return [] if nothing is worth storing
 - Prefer concrete, specific facts over vague observations
 - "importance" 0.8–1.0 = critical; 0.5–0.8 = useful; 0.3–0.5 = borderline; below 0.3 = skip
 - Working memory type = only if explicitly short-term ("today", "this session", "right now")
+- "source_file" = relative file path if the memory is about a specific file or code location (e.g. "src/auth/token.ts"), otherwise null
 - Max 5 items
 
 Conversation:
@@ -142,6 +145,7 @@ export async function extractAndStore(
   mgr: MemoryManager,
   innerThought?: InnerThought,
   sessionId?: string,
+  projectRoot?: string,
 ): Promise<ExtractionResult> {
   try {
     let items: ExtractedItem[] = [];
@@ -206,15 +210,31 @@ export async function extractAndStore(
     // (it calls findSimilar with a 0.95 threshold), so we can just call
     // rememberBatch and let the dedup logic there handle it.
 
-    const inputs: WriteMemoryInput[] = passing.map((item) => ({
-      content: item.content,
-      type: item.type,
-      importance: item.importance,
-      tags: item.tags ?? [],
-      agent_id: agentId,
-      ...(sessionId ? { session_id: sessionId } : {}),
-      created_by: "extractor",
-    }));
+    // ── Step 4: Resolve source hashes ─────────────────────────────
+    // Auto-detect project root if not provided
+    const root = projectRoot ?? await detectProjectRootAsync(process.cwd()).catch(() => process.cwd());
+    const analyzedAt = new Date().toISOString();
+
+    const inputs: WriteMemoryInput[] = await Promise.all(
+      passing.map(async (item) => {
+        const sourceFile = item.source_file ?? undefined;
+        const sourceHash = sourceFile
+          ? (await hashFromRelative(sourceFile, root).catch(() => undefined)) ?? undefined
+          : undefined;
+
+        return {
+          content: item.content,
+          type: item.type,
+          importance: item.importance,
+          tags: item.tags ?? [],
+          agent_id: agentId,
+          ...(sessionId ? { session_id: sessionId } : {}),
+          created_by: "extractor",
+          ...(sourceFile ? { source_file: sourceFile } : {}),
+          ...(sourceHash ? { source_hash: sourceHash, analyzed_at: analyzedAt } : {}),
+        } satisfies WriteMemoryInput;
+      }),
+    );
 
     const batchResult = await mgr.rememberBatch(inputs);
 

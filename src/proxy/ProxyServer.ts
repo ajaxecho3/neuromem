@@ -53,7 +53,8 @@ async function injectMemories(
   model: string | undefined,
   memoryBudgetPct: number,
   mgr: MemoryManager,
-): Promise<{ messages: ChatMessage[]; injected: number; tokensUsed: number }> {
+  projectRoot: string | undefined,
+): Promise<{ messages: ChatMessage[]; injected: number; tokensUsed: number; staleFiles: string[] }> {
   // Estimate a reasonable budget: 2048 tokens unless max_tokens is known
   const contextBudget = Math.floor(2048 * Math.min(Math.max(memoryBudgetPct, 0.05), 0.40));
 
@@ -63,14 +64,17 @@ async function injectMemories(
       limit: 10,
       context_budget: contextBudget,
       model,
+      project_root: projectRoot,
     });
   } catch (err) {
     console.warn("[Proxy] buildContext failed — proceeding without memory injection:", err);
-    return { messages, injected: 0, tokensUsed: 0 };
+    return { messages, injected: 0, tokensUsed: 0, staleFiles: [] };
   }
 
+  const staleFiles = result.metadata.stale_files ?? [];
+
   if (!result.context || result.metadata.injected_count === 0) {
-    return { messages, injected: 0, tokensUsed: 0 };
+    return { messages, injected: 0, tokensUsed: 0, staleFiles };
   }
 
   const memoryBlock = `\nYou have access to the following memory context from previous interactions:\n${result.context}\n`;
@@ -92,6 +96,7 @@ async function injectMemories(
     messages: augmented,
     injected: result.metadata.injected_count,
     tokensUsed: result.metadata.tokens_used,
+    staleFiles,
   };
 }
 
@@ -150,6 +155,8 @@ export function mountProxy(
       (req.headers["x-neuromem-agent-id"] as string | undefined) ?? "default";
     const sessionId =
       (req.headers["x-neuromem-session-id"] as string | undefined) ?? nanoid();
+    const projectRoot =
+      (req.headers["x-neuromem-project-root"] as string | undefined) ?? undefined;
 
     const body = req.body as ChatRequest;
     const isStream = body.stream === true;
@@ -162,7 +169,7 @@ export function mountProxy(
       typeof lastUserMsg?.content === "string" ? lastUserMsg.content : "";
 
     // ── Inject memories ───────────────────────────────────────────
-    const { messages: augmentedMessages, injected, tokensUsed } =
+    const { messages: augmentedMessages, injected, tokensUsed, staleFiles } =
       await injectMemories(
         body.messages ?? [],
         query,
@@ -170,6 +177,7 @@ export function mountProxy(
         body.model,
         memoryBudgetPct,
         mgr,
+        projectRoot,
       );
 
     // ── Build forwarded request ───────────────────────────────────
@@ -193,6 +201,10 @@ export function mountProxy(
     res.setHeader("x-neuromem-memories-injected", String(injected));
     res.setHeader("x-neuromem-tokens-used", String(tokensUsed));
     res.setHeader("x-neuromem-session-id", sessionId);
+    // Signal which files need re-analysis (empty string = all fresh)
+    if (staleFiles.length > 0) {
+      res.setHeader("x-neuromem-stale-files", staleFiles.join(","));
+    }
 
     // ── Forward to LLM ────────────────────────────────────────────
     let upstreamRes: globalThis.Response;
@@ -242,7 +254,7 @@ export function mountProxy(
       setImmediate(() => {
         const assistantText = reconstructAssistantMessage(chunks, targetProvider);
         if (assistantText && query) {
-          extractAndStore(agentId, query, assistantText, mgr, innerThought, sessionId).catch(
+          extractAndStore(agentId, query, assistantText, mgr, innerThought, sessionId, projectRoot).catch(
             () => {},
           );
         }
@@ -266,7 +278,7 @@ export function mountProxy(
           "";
 
         if (assistantText && query) {
-          extractAndStore(agentId, query, assistantText, mgr, innerThought, sessionId).catch(
+          extractAndStore(agentId, query, assistantText, mgr, innerThought, sessionId, projectRoot).catch(
             () => {},
           );
         }

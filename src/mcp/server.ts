@@ -104,6 +104,14 @@ const BuildContextSchema = z.object({
       "Model name for token counting accuracy (e.g. 'gpt-4o', 'claude-3-5-sonnet'). " +
       "Defaults to cl100k_base encoding if omitted.",
     ),
+  project_root: z
+    .string()
+    .optional()
+    .describe(
+      "Absolute path to the project root. When provided, memories whose source file " +
+      "has changed or been deleted are excluded from injection. The response includes " +
+      "stale_files listing files that need re-analysis.",
+    ),
 });
 const RememberBatchSchema = z.object({
   memories: z.array(RememberSchema).min(1).max(20),
@@ -114,6 +122,10 @@ const ExtractTurnSchema = z.object({
   assistant_response: z.string().describe("The assistant's response to extract memories from."),
   agent_id: z.string().default("default"),
   session_id: z.string().optional(),
+  project_root: z.string().optional().describe(
+    "Absolute path to the project root for source file hashing. " +
+    "Auto-detected from CWD if not provided.",
+  ),
 });
 
 // ─── Build MCP server ──────────────────────────────────────────
@@ -376,12 +388,13 @@ function buildMcpServer(
         "Use this INSTEAD of passing full conversation history to cut token costs by 10–30×.",
       inputSchema: BuildContextSchema.shape,
     },
-    async ({ query, agent_id, limit, context_budget, model }) => {
+    async ({ query, agent_id, limit, context_budget, model, project_root }) => {
       try {
         const result = await mgr.buildContext(query, agent_id, {
           limit,
           context_budget,
           model,
+          project_root,
         });
         return {
           content: [
@@ -442,7 +455,7 @@ function buildMcpServer(
         "The proxy calls this automatically; use this tool directly if not using the proxy.",
       inputSchema: ExtractTurnSchema.shape,
     },
-    async ({ user_message, assistant_response, agent_id, session_id }) => {
+    async ({ user_message, assistant_response, agent_id, session_id, project_root }) => {
       try {
         const result = await extractAndStore(
           agent_id,
@@ -451,6 +464,7 @@ function buildMcpServer(
           mgr,
           mgr.innerThought,
           session_id,
+          project_root,
         );
         return {
           content: [
