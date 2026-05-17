@@ -73,11 +73,11 @@ Returns `{ processed, consolidated, forgotten, new_semantic, new_skills, duratio
 User: "Alright, I'm done for today. Thanks!"
 
 ```
-reflect(agent_id: "bernardo", timeframe_days: 7)
+reflect(agent_id: "alice", timeframe_days: 7)
 # → { counts: { episodic: 23, semantic: 6 }, graph: { nodes: 29, edges: 14 } }
 # 23 episodic, only 6 semantic → consolidate
 
-consolidate(agent_id: "bernardo")
+consolidate(agent_id: "alice")
 # → { processed: 23, consolidated: 11, forgotten: 4, new_semantic: 3, new_skills: 1 }
 ```
 

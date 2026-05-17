@@ -53,12 +53,12 @@ Forget removes the wrong version. Then immediately write the correct version:
 
 ```
 # 1. Remove wrong version
-forget(query: "user's database preference", agent_id: "bernardo")
+forget(query: "user's database preference", agent_id: "alice")
 
 # 2. Write correct version
 remember(
   content: "User uses PostgreSQL, not MySQL",
-  agent_id: "bernardo",
+  agent_id: "alice",
   tags: ["preferences", "database"],
   importance: 0.8
 )
@@ -89,7 +89,7 @@ remember(
 ```
 forget(
   query: "Redux state management",
-  agent_id: "bernardo",
+  agent_id: "alice",
   type: ["semantic", "episodic"],
   limit: 20
 )
@@ -103,14 +103,14 @@ forget(
 # Remove old decision
 forget(
   query: "payment provider decision Stripe Paddle",
-  agent_id: "bernardo",
+  agent_id: "alice",
   limit: 5
 )
 
 # Write corrected version
 remember(
   content: "Decided to use Paddle over Stripe for payments",
-  agent_id: "bernardo",
+  agent_id: "alice",
   tags: ["payments", "architecture", "decisions"],
   importance: 0.9
 )

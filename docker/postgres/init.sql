@@ -35,7 +35,11 @@ CREATE TABLE IF NOT EXISTS episodic_memories (
   tags                TEXT[] NOT NULL DEFAULT '{}',
   source              TEXT,
   shared              BOOLEAN NOT NULL DEFAULT FALSE,
-  metadata            JSONB DEFAULT '{}'::jsonb
+  metadata            JSONB DEFAULT '{}'::jsonb,
+  -- Staleness tracking
+  source_file         TEXT,
+  source_hash         TEXT,
+  analyzed_at         TIMESTAMPTZ
 );
 
 CREATE INDEX IF NOT EXISTS idx_episodic_agent_time
@@ -144,3 +148,21 @@ CREATE INDEX IF NOT EXISTS idx_memory_versions_memory_id
   ON memory_versions (memory_id, version DESC);
 CREATE INDEX IF NOT EXISTS idx_memory_versions_agent
   ON memory_versions (agent_id, archived_at DESC);
+
+-- ─── Staleness tracking migration (idempotent) ───────────────────
+-- Safe to run on existing installs — IF NOT EXISTS on columns
+-- is not standard SQL, so we use DO blocks to guard each ALTER.
+DO $$ BEGIN
+  ALTER TABLE episodic_memories ADD COLUMN source_file TEXT;
+EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE episodic_memories ADD COLUMN source_hash TEXT;
+EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE episodic_memories ADD COLUMN analyzed_at TIMESTAMPTZ;
+EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+
+CREATE INDEX IF NOT EXISTS idx_episodic_source_file
+  ON episodic_memories (source_file) WHERE source_file IS NOT NULL;

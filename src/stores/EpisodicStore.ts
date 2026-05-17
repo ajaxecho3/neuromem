@@ -64,8 +64,8 @@ export class EpisodicStore {
     const res = await this.pool.query(
       `INSERT INTO episodic_memories
          (id, agent_id, title, content, occurred_at, importance, valence, arousal,
-          tags, source, shared, metadata)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+          tags, source, shared, metadata, source_file, source_hash, analyzed_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
        RETURNING *`,
       [
         id,
@@ -80,6 +80,9 @@ export class EpisodicStore {
         input.source ?? null,
         input.shared ?? false,
         JSON.stringify(provenance),
+        input.source_file ?? null,
+        input.source_hash ?? null,
+        input.analyzed_at ? new Date(input.analyzed_at) : null,
       ],
     );
     return rowToMemory(res.rows[0]);
@@ -447,6 +450,11 @@ function rowToMemory(row: any): Memory {
     tags: row.tags ?? [],
     source: row.source ?? undefined,
     shared: row.shared,
+    source_file: row.source_file ?? undefined,
+    source_hash: row.source_hash ?? undefined,
+    analyzed_at: row.analyzed_at
+      ? new Date(row.analyzed_at).toISOString()
+      : undefined,
   };
 }
 

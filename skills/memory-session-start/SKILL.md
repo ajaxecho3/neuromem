@@ -79,7 +79,7 @@ User: "Hey, let's pick up where we left off on the payment integration."
 ```
 recall(
   query: "payment integration",
-  agent_id: "bernardo",
+  agent_id: "alice",
   limit: 10
 )
 ```

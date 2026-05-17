@@ -83,7 +83,7 @@ associate(
 ```
 remember(
   content: "User prefers kebab-case for CSS class names",
-  agent_id: "bernardo",
+  agent_id: "alice",
   tags: ["preferences", "css", "naming"],
   importance: 0.75
 )
@@ -96,7 +96,7 @@ remember(
 ```
 remember(
   content: "Decided to use Stripe over Paddle for payments — simpler API",
-  agent_id: "bernardo",
+  agent_id: "alice",
   tags: ["payments", "architecture", "decisions"],
   importance: 0.9
 )
