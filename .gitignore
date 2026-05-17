@@ -9,3 +9,10 @@ ui/node_modules/
 
 docs/superpowers/
 .bench/*
+
+# Local IDE / tool config (machine-specific)
+.claude/
+.vscode/
+
+# Binary archives (regenerate from source)
+*.zip

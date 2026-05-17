@@ -1,0 +1,22 @@
+{
+	"folders": [
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"mcp": {
+			"inputs": [],
+			"servers": {}
+		},
+		"chat.mcp.serverSampling": {
+			"neuromem.code-workspace: neuromem": {
+				"allowedModels": [
+					"copilot/auto",
+					"copilotcli/claude-sonnet-4.6"
+				]
+			}
+		},
+		"makefile.configureOnOpen": false
+	}
+}
