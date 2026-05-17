@@ -1,7 +1,7 @@
 {
   "name": "neuromem-mcp",
   "version": "0.1.0",
-  "description": "Brain-inspired memory framework for AI agents — episodic, semantic, procedural, working, and affective memory via MCP.",
+  "description": "Persistent, brain-inspired memory for AI agents. Episodic, semantic, procedural, working, and affective memory via MCP or a drop-in LLM proxy. Self-hosted Docker stack with spaced-repetition decay, background consolidation, and a built-in web UI.",
   "type": "module",
   "main": "dist/mcp/server.js",
   "bin": {
@@ -31,11 +31,31 @@
   },
   "keywords": [
     "mcp",
+    "model-context-protocol",
     "memory",
+    "persistent-memory",
+    "ai-memory",
+    "agent-memory",
+    "long-term-memory",
+    "llm-memory",
     "agents",
     "llm",
+    "ai-agents",
+    "claude-memory",
+    "openai-memory",
     "brain-inspired",
-    "docker"
+    "episodic-memory",
+    "semantic-memory",
+    "vector-database",
+    "spaced-repetition",
+    "ebbinghaus",
+    "chromadb",
+    "neo4j",
+    "redis",
+    "postgres",
+    "docker",
+    "self-hosted",
+    "typescript"
   ],
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",

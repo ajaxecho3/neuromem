@@ -1,6 +1,27 @@
 # 🧠 NeuroMem
 
-A **brain-inspired persistent memory framework** for AI agents, running as a self-hosted Docker stack. Gives agents episodic, semantic, procedural, working, and affective memory — each backed by the optimal storage engine — with spaced-repetition decay, temporal reasoning, memory versioning, and a built-in web UI for inspection.
+**Persistent, brain-inspired memory for AI agents — episodic, semantic, procedural, working, and affective — via MCP or a drop-in LLM proxy.**
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Node.js](https://img.shields.io/badge/Node.js-22%2B-green.svg)](https://nodejs.org)
+[![Docker](https://img.shields.io/badge/Docker-compose-2496ED?logo=docker&logoColor=white)](docker-compose.yml)
+[![MCP](https://img.shields.io/badge/MCP-compatible-blueviolet)](https://modelcontextprotocol.io)
+
+NeuroMem is a self-hosted memory framework that gives AI agents long-term memory across sessions. It maps five human memory systems onto the optimal storage engine for each, wraps them behind an MCP server and REST API, and adds spaced-repetition decay, background consolidation, and a web UI for inspection — so agents remember what matters and forget what doesn't.
+
+---
+
+## Why NeuroMem?
+
+Most AI agents are stateless — every conversation starts from scratch. NeuroMem solves that without gluing in a single flat vector store:
+
+- **Five memory types, five backends** — each optimised for its job (Redis for fast working memory, Postgres for episodic timelines, ChromaDB for semantic similarity, Neo4j for associations, Postgres weighted for affective valence)
+- **Automatic routing** — content is classified and stored in the right type without the agent having to decide
+- **Forgetting curve** — memories decay by the Ebbinghaus model, so the agent isn't drowning in stale context
+- **Zero-code integration** — point any OpenAI-compatible agent at the proxy, and memory injection + extraction happen automatically on every turn
+- **Works with any MCP client** — Claude Desktop, VS Code Copilot, the Claude CLI, or any Streamable HTTP client
+
+---
 
 ## 🏗️ Architecture
 
@@ -9,6 +30,7 @@ A **brain-inspired persistent memory framework** for AI agents, running as a sel
 │              Agents (Claude, GPT, custom…)               │
 └──────────────────┬───────────────────────────────────────┘
                    │ MCP (stdio / SSE) · REST /tools/*
+                   │ OpenAI-compatible proxy (optional)
 ┌──────────────────▼───────────────────────────────────────┐
 │              NeuroMem Server (TypeScript / Node)         │
 │  remember · recall · associate · forget                  │
@@ -40,6 +62,348 @@ A **brain-inspired persistent memory framework** for AI agents, running as a sel
 | **Temporal Cortex**   | Semantic     | ChromaDB              | Vector similarity for facts   |
 | **Cerebellum**        | Procedural   | ChromaDB              | Similar how-tos via vectors   |
 | **Entorhinal Cortex** | Associations | Neo4j                 | Graph of memory links         |
+
+---
+
+## 🚀 Quick Start
+
+```bash
+# 1. Clone + configure
+git clone https://github.com/your-org/neuromem.git
+cd neuromem
+cp .env.example .env
+# edit .env — at minimum, change the passwords
+
+# 2. Start the stack
+docker compose up -d --build
+
+# 3. Wait for all services to be healthy
+./scripts/wait-for-services.sh
+
+# 4. Verify
+curl http://localhost:3000/health
+# → {"status":"ok","timestamp":"..."}
+
+# 5. Open the Web UI
+open http://localhost:3000
+```
+
+---
+
+## 🔌 Connecting Agents
+
+### Option A: REST
+
+```bash
+curl -X POST http://localhost:3000/tools/remember \
+  -H 'Content-Type: application/json' \
+  -d '{"content":"User prefers dark mode","agent_id":"alice","importance":0.8}'
+```
+
+---
+
+### Option B: Claude Desktop (MCP via stdio)
+
+Build first, then add the entry to Claude Desktop's config:
+
+**Step 1 — Build**
+
+```bash
+npm install && npm run build
+```
+
+**Step 2 — Add to `~/Library/Application Support/Claude/claude_desktop_config.json`**
+
+```json
+{
+  "mcpServers": {
+    "neuromem": {
+      "command": "node",
+      "args": ["/absolute/path/to/neuromem/dist/mcp/server.js"],
+      "env": {
+        "SERVER_MODE": "stdio",
+        "POSTGRES_HOST": "localhost",
+        "POSTGRES_PORT": "5432",
+        "POSTGRES_DB": "neuromem",
+        "POSTGRES_USER": "neuromem",
+        "POSTGRES_PASSWORD": "your-postgres-password",
+        "CHROMA_HOST": "localhost",
+        "CHROMA_PORT": "8000",
+        "CHROMA_TOKEN": "your-chroma-token",
+        "NEO4J_URI": "bolt://localhost:7687",
+        "NEO4J_USER": "neo4j",
+        "NEO4J_PASSWORD": "your-neo4j-password",
+        "REDIS_HOST": "localhost",
+        "REDIS_PORT": "6379",
+        "REDIS_PASSWORD": "your-redis-password",
+        "LLM_PROVIDER": "none"
+      }
+    }
+  }
+}
+```
+
+> Use the passwords from your `.env` file. `LLM_PROVIDER=none` skips InnerThought in the stdio process — the Docker server already handles cognition.
+
+**Step 3 — Restart Claude Desktop** and look for the 🔨 tools icon.
+
+---
+
+### Option C: VS Code / GitHub Copilot (MCP via Streamable HTTP)
+
+Add to `.vscode/mcp.json` in your workspace:
+
+```json
+{
+  "servers": {
+    "neuromem": {
+      "type": "http",
+      "url": "http://localhost:3000/mcp"
+    }
+  }
+}
+```
+
+---
+
+### Option D: Claude CLI
+
+```bash
+claude mcp add --transport http neuromem http://localhost:3000/mcp
+claude mcp list
+```
+
+---
+
+### Option E: Any MCP-compatible client (Streamable HTTP)
+
+```
+http://localhost:3000/mcp
+```
+
+Supports the MCP Streamable HTTP transport spec (POST/GET/DELETE on the same endpoint with `mcp-session-id` header).
+
+---
+
+### Option F: Drop-in LLM Proxy (zero-code memory injection)
+
+NeuroMem can act as an OpenAI-compatible proxy between your agent and any LLM API. Your agent only changes its `baseURL` — no other code changes required.
+
+**Per-request flow:**
+1. Parse the incoming chat request
+2. Recall relevant memories → inject a `<memory>` block into the system prompt
+3. Forward the augmented request to the real LLM API
+4. Stream/return the response with observability headers
+5. Run `extractAndStore()` in the background — automatically mines the exchange for facts, decisions, and preferences
+
+**Enable in `.env`:**
+
+```env
+PROXY_ENABLED=true
+PROXY_TARGET_URL=https://api.openai.com   # or https://api.anthropic.com
+PROXY_TARGET_PROVIDER=openai              # openai | anthropic
+PROXY_PORT=3001
+PROXY_MEMORY_BUDGET_PCT=0.20
+```
+
+**Point your agent at the proxy:**
+
+```python
+# OpenAI SDK
+client = OpenAI(
+    base_url="http://localhost:3001/v1",
+    api_key=os.environ["OPENAI_API_KEY"],
+    default_headers={"X-NeuroMem-Agent-Id": "my-agent"}
+)
+```
+
+```typescript
+// Vercel AI SDK / any OpenAI-compatible client
+const openai = createOpenAI({ baseURL: "http://localhost:3001/v1" });
+```
+
+Use `extract_turn` directly (see MCP Tools) if you prefer explicit control over extraction rather than the proxy.
+
+---
+
+## 🛠️ MCP Tools
+
+| Tool                   | Purpose                                                                                              |
+| ---------------------- | ---------------------------------------------------------------------------------------------------- |
+| `remember`             | Store a memory (auto-routed by type + LLM enrichment)                                               |
+| `remember_batch`       | Store multiple memories in one call — reduces round-trips at session end                             |
+| `recall`               | Hybrid search across all stores; supports natural-language time queries                              |
+| `associate`            | Link two memories in the association graph                                                           |
+| `spreading_activation` | Find memories within N graph hops of a seed memory                                                   |
+| `forget`               | Delete by ID or by semantic query                                                                    |
+| `consolidate`          | Run the sleep-inspired compression pass for an agent                                                 |
+| `reflect`              | Aggregate stats — counts, top tags, consolidation ratio                                              |
+| `memory_history`       | Retrieve the full version history of an episodic memory                                              |
+| `build_context`        | Return a token-budgeted, ready-to-inject context string; supports `project_root` for staleness checks |
+| `extract_turn`         | Manually trigger post-turn extraction on a conversation exchange — identifies and stores key facts   |
+
+---
+
+## 🧠 Writing Memories
+
+The router auto-classifies content using pattern matching + LLM fallback:
+
+```json
+POST /tools/remember
+{
+  "content": "How to deploy: 1. npm build  2. Push  3. Verify",
+  "agent_id": "alice"
+}
+```
+
+→ routed to `procedural` (step-by-step pattern)
+
+Override with an explicit type or add tags:
+
+```json
+{
+  "content": "The API rate limit is 1000 req/min",
+  "type": "semantic",
+  "importance": 0.9,
+  "tags": ["api", "limits"]
+}
+```
+
+---
+
+## 🔍 Recalling Memories
+
+```json
+POST /tools/recall
+{
+  "query": "deployment process",
+  "agent_id": "alice",
+  "type": ["procedural", "semantic"],
+  "limit": 5
+}
+```
+
+Results are ranked by `importance × recency` and annotated with a **retention score** (Ebbinghaus forgetting curve). Retrieval bumps each memory's access count.
+
+### Time-based queries
+
+```json
+{
+  "query": "what did we discuss",
+  "agent_id": "alice",
+  "time_query": "last week"
+}
+```
+
+Supports: `today`, `yesterday`, `last N days/weeks/months`, `this week`, `past N hours`.
+
+---
+
+## 🧹 Staleness Detection
+
+Memories can be linked to source files at store time (the proxy and `extract_turn` do this automatically when `project_root` is set). When `build_context` is called with `project_root`, NeuroMem hashes each recalled memory's source file against the version stored when the memory was written. Memories whose file has since changed or been deleted are excluded from injection and reported in `stale_files`:
+
+```json
+POST /tools/build_context
+{
+  "query": "how does auth work",
+  "agent_id": "alice",
+  "project_root": "/absolute/path/to/project",
+  "model": "gpt-4o",
+  "context_budget": 2048
+}
+```
+
+Response includes:
+
+```json
+{
+  "context": "...",
+  "metadata": {
+    "injected_count": 4,
+    "tokens_used": 312,
+    "stale_files": ["src/auth/middleware.ts"]
+  }
+}
+```
+
+`stale_files` is a signal to re-analyse those files and refresh the affected memories.
+
+---
+
+## 💤 Consolidation
+
+Mirrors sleep-based memory consolidation. Run periodically or let the background loop handle it:
+
+```json
+POST /tools/consolidate
+{ "agent_id": "alice" }
+```
+
+Effects:
+
+1. Cluster episodic memories by shared tags
+2. Abstract clusters into semantic memories (LLM summarizer via `InnerThought`)
+3. Forget memories that are old, low-importance, rarely accessed, **and** have near-zero retention (Ebbinghaus decay)
+
+---
+
+## 📈 Spaced Repetition & Decay
+
+Memories decay using the **Ebbinghaus forgetting curve**. Each memory carries a computed `retention` score on recall:
+
+$$R = e^{-\Delta t \;/\; (S \times k)}$$
+
+where:
+
+- $\Delta t$ = days since `last_accessed`
+- $k$ = `RETENTION_SCALE_DAYS` (default 30)
+- $S$ = stability = `importance × (1 + ln(1 + access_count)) × (1 + consolidation_level)`
+
+- `stability` is derived from importance, access count, and consolidation level
+- `decay_rate` adjusts per-memory based on usage
+- The consolidator only forgets memories where importance, age, access count, **and** retention all indicate disuse
+- Configure the scale: `RETENTION_SCALE_DAYS=30`
+
+---
+
+## 🔢 Memory Versioning
+
+Every `PUT /api/ui/memories/:id` automatically archives the previous state. Full history is retrievable:
+
+```bash
+GET /api/ui/memories/:id/history
+# Returns all previous versions with timestamp and reason
+```
+
+Via MCP:
+
+```json
+{ "tool": "memory_history", "id": "epi_abc123" }
+```
+
+Note: versioning applies to episodic (`epi_`) memories only.
+
+---
+
+## 🕸️ Cross-Agent Memory
+
+Mark a memory `"shared": true` to put it in the shared pool. Any agent's `recall` with `include_shared: true` (default) can retrieve it.
+
+---
+
+## 🖥️ Web UI
+
+Built-in React dashboard at `http://localhost:3000`:
+
+| View                | Description                                                                                            |
+| ------------------- | ------------------------------------------------------------------------------------------------------ |
+| **Memory Browser**  | Browse all memories across agents; filter by type/importance/tags; live "tokens saved" metering tiles |
+| **Memory Detail**   | Edit title, importance, tags; view version history; delete                                             |
+| **Graph View**      | Visual association graph — nodes by memory type, edges by association strength                         |
+| **Context Builder** | Build and preview an LLM-ready context string for any agent + query                                    |
+| **Agent Dashboard** | Per-agent memory counts, consolidation stats, decay overview                                           |
+| **Cognition Log**   | Live stream of InnerThought background processing events                                               |
 
 ---
 
@@ -101,7 +465,7 @@ Abstraction layer over multiple LLM backends. Configured via `LLM_PROVIDER`:
 
 | Provider    | Env var             | Default model                               |
 | ----------- | ------------------- | ------------------------------------------- |
-| `ollama`    | `OLLAMA_URL`        | `INNER_THOUGHT_MODEL=gemma4`                |
+| `ollama`    | `OLLAMA_URL`        | `INNER_THOUGHT_MODEL=llama3.2:3b`           |
 | `openai`    | `OPENAI_API_KEY`    | `INNER_THOUGHT_MODEL=gpt-4o-mini`           |
 | `anthropic` | `ANTHROPIC_API_KEY` | `INNER_THOUGHT_MODEL=claude-haiku-20240307` |
 | `none`      | —                   | Noop — skips all LLM calls                  |
@@ -124,53 +488,6 @@ For each registered agent:
   4. Execute decisions via MemoryManager
   5. Log cognition summary to working memory (TTL=1h)
 ```
-
-Runs safely — all errors are caught and logged without crashing the server.
-
-### Spaced Repetition — Ebbinghaus Forgetting Curve
-
-Every recalled memory gets an annotated `retention` score computed as:
-
-$$R = e^{-\Delta t \;/\; (S \times k)}$$
-
-where:
-
-- $\Delta t$ = days since `last_accessed`
-- $k$ = `RETENTION_SCALE_DAYS` (default 30)
-- $S$ = stability = `importance × (1 + ln(1 + access_count)) × (1 + consolidation_level)`
-
-**`applyDecay`** (called during consolidation) recalculates each memory's importance proportionally:
-
-```
-new_importance = retention × original_importance
-```
-
-**Forget gate** — consolidator only forgets episodic memories where **all four** conditions hold:
-
-1. `importance < 0.2`
-2. `ageDays > 30`
-3. `access_count < 2`
-4. `retention < 0.1` (Ebbinghaus — nearly forgotten)
-
-### Memory Versioning
-
-Every `update()` on an episodic memory automatically archives the prior state:
-
-```sql
--- memory_versions table
-id          UUID PRIMARY KEY
-memory_id   TEXT             -- references episodic_memories.id
-agent_id    TEXT
-version     INTEGER          -- monotonically increasing per memory_id
-content     TEXT
-title       TEXT
-importance  REAL
-tags        TEXT[]
-archived_at TIMESTAMPTZ
-reason      TEXT             -- 'update' | 'conflict_replace'
-```
-
-`archiveVersion(id, reason)` is called before every `update()` — the caller never needs to think about it.
 
 ### Hybrid Recall
 
@@ -200,11 +517,29 @@ query
 
 Three pluggable providers via `EMBEDDING_PROVIDER`:
 
-| Provider          | How                                                          | Dimensions |
-| ----------------- | ------------------------------------------------------------ | ---------- |
+| Provider          | How                                                           | Dimensions |
+| ----------------- | ------------------------------------------------------------- | ---------- |
 | `local` (default) | `@xenova/transformers` — `all-MiniLM-L6-v2`, runs in-process | 384        |
-| `openai`          | `text-embedding-3-small` via API                             | 1536       |
-| `voyage`          | `voyage-3-lite` via API                                      | 512        |
+| `openai`          | `text-embedding-3-small` via API                              | 1536       |
+| `voyage`          | `voyage-3-lite` via API                                       | 512        |
+
+### Memory Versioning (internals)
+
+```sql
+-- memory_versions table
+id          UUID PRIMARY KEY
+memory_id   TEXT             -- references episodic_memories.id
+agent_id    TEXT
+version     INTEGER          -- monotonically increasing per memory_id
+content     TEXT
+title       TEXT
+importance  REAL
+tags        TEXT[]
+archived_at TIMESTAMPTZ
+reason      TEXT             -- 'update' | 'conflict_replace'
+```
+
+`archiveVersion(id, reason)` is called before every `update()` — the caller never needs to think about it.
 
 ### Data Schema (Postgres)
 
@@ -234,272 +569,33 @@ consolidation_runs
   new_semantic_count, new_skills_count, report JSONB
 ```
 
-### Environment Variables
-
-| Variable                              | Default                  | Description                                   |
-| ------------------------------------- | ------------------------ | --------------------------------------------- |
-| `SERVER_MODE`                         | `http`                   | `http` or `stdio` (for Claude Desktop)        |
-| `HTTP_PORT`                           | `3000`                   | Server port                                   |
-| `LLM_PROVIDER`                        | `ollama`                 | `ollama` \| `openai` \| `anthropic` \| `none` |
-| `INNER_THOUGHT_MODEL`                 | `gemma4`                 | Model name for the chosen provider            |
-| `INNER_THOUGHT_TIMEOUT_MS`            | `2000`                   | LLM call hard timeout                         |
-| `COGNITION_ENABLED`                   | `true`                   | Enable background sleep cycle                 |
-| `COGNITION_INTERVAL_MINUTES`          | `30`                     | How often the sleep cycle runs                |
-| `RETENTION_SCALE_DAYS`                | `30`                     | Ebbinghaus decay scale constant               |
-| `EMBEDDING_PROVIDER`                  | `local`                  | `local` \| `openai` \| `voyage`               |
-| `OLLAMA_URL`                          | `http://localhost:11434` | Ollama server URL                             |
-| `POSTGRES_HOST/PORT/DB/USER/PASSWORD` | —                        | Postgres connection                           |
-| `CHROMA_HOST/PORT/TOKEN`              | —                        | ChromaDB connection                           |
-| `NEO4J_URI/USER/PASSWORD`             | —                        | Neo4j connection                              |
-| `REDIS_HOST/PORT/PASSWORD`            | —                        | Redis connection                              |
-
 ---
 
-```bash
-# 1. Clone + configure
-git clone <your-repo> neuromem
-cd neuromem
-cp .env.example .env
-# edit .env — at minimum, change the passwords
+## ⚙️ Environment Variables
 
-# 2. Bring up the stack
-docker compose up -d --build
-
-# 3. Wait for all services to be healthy
-./scripts/wait-for-services.sh
-
-# 4. Verify
-curl http://localhost:3000/health
-# → {"status":"ok","timestamp":"..."}
-
-# 5. Open the Web UI
-open http://localhost:3000
-```
-
-## 🔌 Connecting Agents
-
-### Option A: REST
-
-```bash
-curl -X POST http://localhost:3000/tools/remember \
-  -H 'Content-Type: application/json' \
-  -d '{"content":"User prefers dark mode","agent_id":"alice","importance":0.8}'
-```
+| Variable                              | Default                  | Description                                            |
+| ------------------------------------- | ------------------------ | ------------------------------------------------------ |
+| `SERVER_MODE`                         | `http`                   | `http` or `stdio` (for Claude Desktop)                 |
+| `HTTP_PORT`                           | `3000`                   | Server port                                            |
+| `LLM_PROVIDER`                        | `ollama`                 | `ollama` \| `openai` \| `anthropic` \| `none`          |
+| `INNER_THOUGHT_MODEL`                 | `llama3.2:3b`            | Model name for the chosen provider                     |
+| `INNER_THOUGHT_TIMEOUT_MS`            | `2000`                   | LLM call hard timeout                                  |
+| `COGNITION_ENABLED`                   | `true`                   | Enable background sleep cycle                          |
+| `COGNITION_INTERVAL_MINUTES`          | `30`                     | How often the sleep cycle runs                         |
+| `RETENTION_SCALE_DAYS`                | `30`                     | Ebbinghaus decay scale constant                        |
+| `EMBEDDING_PROVIDER`                  | `local`                  | `local` \| `openai` \| `voyage`                        |
+| `OLLAMA_URL`                          | `http://localhost:11434` | Ollama server URL                                      |
+| `POSTGRES_HOST/PORT/DB/USER/PASSWORD` | —                        | Postgres connection                                    |
+| `CHROMA_HOST/PORT/TOKEN`              | —                        | ChromaDB connection                                    |
+| `NEO4J_URI/USER/PASSWORD`             | —                        | Neo4j connection                                       |
+| `REDIS_HOST/PORT/PASSWORD`            | —                        | Redis connection                                       |
+| `PROXY_ENABLED`                       | `false`                  | Enable the drop-in LLM proxy                           |
+| `PROXY_PORT`                          | `3001`                   | Port the proxy listens on                              |
+| `PROXY_TARGET_URL`                    | —                        | Upstream LLM base URL (e.g. `https://api.openai.com`)  |
+| `PROXY_TARGET_PROVIDER`               | `openai`                 | `openai` \| `anthropic` — affects SSE parsing          |
+| `PROXY_MEMORY_BUDGET_PCT`             | `0.20`                   | Fraction of context for memories (clamped 0.05–0.40)   |
 
 ---
-
-### Option B: Claude Desktop (MCP via stdio)
-
-The stdio process runs locally and connects to the Docker services directly. Build the project first, then add the entry to Claude Desktop's config.
-
-**Step 1 — Build**
-
-```bash
-cd /path/to/neuromem
-npm install && npm run build
-```
-
-**Step 2 — Add to `~/Library/Application Support/Claude/claude_desktop_config.json`**
-
-```json
-{
-  "mcpServers": {
-    "neuromem": {
-      "command": "node",
-      "args": ["/absolute/path/to/neuromem/dist/mcp/server.js"],
-      "env": {
-        "SERVER_MODE": "stdio",
-        "POSTGRES_HOST": "localhost",
-        "POSTGRES_PORT": "5432",
-        "POSTGRES_DB": "neuromem",
-        "POSTGRES_USER": "neuromem",
-        "POSTGRES_PASSWORD": "your-postgres-password",
-        "CHROMA_HOST": "localhost",
-        "CHROMA_PORT": "8000",
-        "CHROMA_TOKEN": "your-chroma-token",
-        "NEO4J_URI": "bolt://localhost:7687",
-        "NEO4J_USER": "neo4j",
-        "NEO4J_PASSWORD": "your-neo4j-password",
-        "REDIS_HOST": "localhost",
-        "REDIS_PORT": "6379",
-        "REDIS_PASSWORD": "your-redis-password",
-        "LLM_PROVIDER": "none"
-      }
-    }
-  }
-}
-```
-
-> Use the passwords from your `.env` file. `LLM_PROVIDER=none` skips InnerThought in the stdio process — the Docker server already handles cognition.
-
-**Step 3 — Restart Claude Desktop** and look for the 🔨 tools icon in the chat input.
-
----
-
-### Option C: VS Code / GitHub Copilot (MCP via Streamable HTTP)
-
-The server exposes MCP over HTTP at `/mcp` — no build needed, works directly against the running Docker container.
-
-Add to `.vscode/mcp.json` in your workspace (or VS Code `settings.json`):
-
-```json
-{
-  "servers": {
-    "neuromem": {
-      "type": "http",
-      "url": "http://localhost:3000/mcp"
-    }
-  }
-}
-```
-
----
-
-### Option D: Claude CLI
-
-```bash
-claude mcp add --transport http neuromem http://localhost:3000/mcp
-
-# Verify
-claude mcp list
-```
-
----
-
-### Option E: Any MCP-compatible client (Streamable HTTP)
-
-Point your client at:
-
-```
-http://localhost:3000/mcp
-```
-
-Supports the MCP Streamable HTTP transport spec (POST/GET/DELETE on the same endpoint with `mcp-session-id` header).
-
-## 🛠️ MCP Tools
-
-| Tool                   | Purpose                                                                 |
-| ---------------------- | ----------------------------------------------------------------------- |
-| `remember`             | Store a memory (auto-routed by type + LLM enrichment)                   |
-| `recall`               | Hybrid search across all stores; supports natural-language time queries |
-| `associate`            | Link two memories in the association graph                              |
-| `spreading_activation` | Find memories within N graph hops of a seed memory                      |
-| `forget`               | Delete by ID or by semantic query                                       |
-| `consolidate`          | Run the sleep-inspired compression pass for an agent                    |
-| `reflect`              | Aggregate stats — counts, top tags, consolidation ratio                 |
-| `memory_history`       | Retrieve the full version history of an episodic memory                 |
-| `build_context`        | Return a compact, ready-to-inject context string for LLM prompts        |
-
-## 🧠 Writing Memories
-
-The router auto-classifies content using pattern matching + LLM fallback:
-
-```json
-POST /tools/remember
-{
-  "content": "How to deploy: 1. npm build  2. Push  3. Verify",
-  "agent_id": "alice"
-}
-```
-
-→ routed to `procedural` (step-by-step pattern)
-
-Override with an explicit type or add tags:
-
-```json
-{
-  "content": "The API rate limit is 1000 req/min",
-  "type": "semantic",
-  "importance": 0.9,
-  "tags": ["api", "limits"]
-}
-```
-
-## 🔍 Recalling Memories
-
-```json
-POST /tools/recall
-{
-  "query": "deployment process",
-  "agent_id": "alice",
-  "type": ["procedural", "semantic"],
-  "limit": 5
-}
-```
-
-Results are ranked by `importance × recency` and annotated with a **retention score** (Ebbinghaus forgetting curve). Retrieval bumps each memory's access count.
-
-### Time-based queries
-
-```json
-{
-  "query": "what did we discuss",
-  "agent_id": "alice",
-  "time_query": "last week"
-}
-```
-
-Supports: `today`, `yesterday`, `last N days/weeks/months`, `this week`, `past N hours`.
-
-## 💤 Consolidation
-
-Mirrors sleep-based memory consolidation. Run periodically or let the background loop handle it:
-
-```json
-POST /tools/consolidate
-{ "agent_id": "alice" }
-```
-
-Effects:
-
-1. Cluster episodic memories by shared tags
-2. Abstract clusters into semantic memories (LLM summarizer via `InnerThought`)
-3. Forget memories that are old, low-importance, rarely accessed, **and** have near-zero retention (Ebbinghaus decay)
-
-## 📈 Spaced Repetition & Decay
-
-Memories decay using the **Ebbinghaus forgetting curve**. Each memory carries a computed `retention` score on recall:
-
-- `stability` is derived from importance, access count, and consolidation level
-- `decay_rate` adjusts per-memory based on usage
-- The consolidator only forgets memories where importance, age, access count, **and** retention all indicate disuse
-- `applyDecay` recalculates importance proportionally instead of using a flat SQL UPDATE
-
-Configure the decay scale: `RETENTION_SCALE_DAYS=30` (default).
-
-## 🔢 Memory Versioning
-
-Every `PUT /api/ui/memories/:id` automatically archives the previous state before updating. Full history is retrievable:
-
-```bash
-GET /api/ui/memories/:id/history
-# Returns all previous versions with timestamp and reason
-```
-
-Via MCP:
-
-```json
-{ "tool": "memory_history", "id": "epi_abc123" }
-```
-
-Note: versioning applies to episodic (`epi_`) memories only.
-
-## 🕸️ Cross-Agent Memory
-
-Mark a memory `"shared": true` to put it in the shared pool. Any agent's `recall` with `include_shared: true` (default) can retrieve it.
-
-## 🖥️ Web UI
-
-Built-in React dashboard served at `http://localhost:3000`:
-
-| View                | Description                                                                                          |
-| ------------------- | ---------------------------------------------------------------------------------------------------- |
-| **Memory Browser**  | Browse all memories across agents, filter by type/importance/tags, paginate, click through to detail |
-| **Memory Detail**   | Edit title, importance, tags; view version history; delete                                           |
-| **Graph View**      | Visual association graph — nodes by memory type, edges by association strength                       |
-| **Context Builder** | Build and preview an LLM-ready context string for any agent + query                                  |
-| **Agent Dashboard** | Per-agent memory counts, consolidation stats, decay overview                                         |
-| **Cognition Log**   | Live stream of InnerThought background processing events                                             |
 
 ## 🗂️ Project Structure
 
@@ -515,7 +611,9 @@ neuromem/
 │   │   ├── SemanticStore.ts    # ChromaDB — semantic + procedural
 │   │   ├── WorkingStore.ts     # Redis — working memory
 │   │   ├── AssociationStore.ts # Neo4j — memory graph
-│   │   └── MemoryManager.ts    # Orchestrator + listAll + recall
+│   │   ├── MemoryManager.ts    # Orchestrator + listAll + recall
+│   │   ├── RecallStatsStore.ts # Per-recall token metering (powers UI "tokens saved" tiles)
+│   │   └── IndexManager.ts     # JSON side-indices for fast lookup (metadata, tags, associations)
 │   ├── router/
 │   │   └── MemoryRouter.ts     # Pattern + LLM-based type classifier
 │   ├── consolidation/
@@ -523,13 +621,18 @@ neuromem/
 │   ├── cognition/
 │   │   ├── BackgroundCognition.ts  # Autonomous sleep loop
 │   │   ├── InnerThought.ts     # Pluggable LLM client (Ollama/OpenAI/Anthropic)
+│   │   ├── Extractor.ts        # Post-turn extraction pipeline (auto-mines facts from exchanges)
+│   │   ├── StalenessChecker.ts # Validates memory freshness against source file hashes
 │   │   └── LLMProvider.ts
+│   ├── proxy/
+│   │   └── ProxyServer.ts      # Drop-in OpenAI-compatible proxy with memory injection + extraction
 │   ├── embeddings/             # Pluggable: local / OpenAI / Voyage
 │   ├── mcp/server.ts           # MCP + HTTP entry point
 │   ├── ui-api/routes.ts        # REST API for the Web UI
 │   └── utils/
 │       ├── config.ts           # Env-based config
 │       ├── retention.ts        # Ebbinghaus forgetting curve math
+│       ├── SourceHasher.ts     # File hashing for staleness detection
 │       └── timeParser.ts       # Natural language → time range
 ├── ui/                         # React + Vite dashboard
 │   └── src/
@@ -550,18 +653,22 @@ neuromem/
 └── examples/demo.ts            # End-to-end demo
 ```
 
+---
+
 ## 🔐 Security Notes
 
 Before deploying beyond localhost:
 
-- Change ALL passwords in `.env`
+- Change **all** passwords in `.env`
 - Put the server behind an auth proxy (reverse proxy + bearer token)
-- Restrict Postgres/Chroma/Neo4j/Redis ports to the Docker network only (remove `ports:` in compose for internal services)
+- Restrict Postgres/Chroma/Neo4j/Redis ports to the Docker network (remove `ports:` for internal services)
 - Disable Neo4j HTTP (`7474`) in production
+
+---
 
 ## 🗺️ Roadmap
 
-- [x] LLM-powered consolidation (Ollama/gemma4 via `InnerThought`)
+- [x] LLM-powered consolidation (Ollama/local via `InnerThought`)
 - [x] Background cognition loop — autonomous sleep-cycle memory management
 - [x] Spaced repetition / Ebbinghaus forgetting curve decay
 - [x] Temporal reasoning — natural-language time queries (`"last week"`, `"past 3 hours"`)
@@ -569,12 +676,33 @@ Before deploying beyond localhost:
 - [x] Memory versioning — auto-archive before every update, full history via API + MCP
 - [x] Web UI — memory browser, graph view, context builder, agent dashboard, cognition log
 - [x] Multi-agent enumeration — agents listed from registry, all-agents browse mode
-- [ ] Conflict detection + auto-replace on contradiction
+- [x] Conflict detection — negation heuristic + LLM arbitration; `conflict_replace` tracked in version history
+- [x] Drop-in LLM proxy — OpenAI-compatible with automatic memory injection and post-turn extraction
+- [x] Post-turn memory extraction — `extract_turn` tool + `Extractor` pipeline
+- [x] Staleness detection — source-file hashing; stale memories excluded from `build_context` injection
+- [x] Token metering — per-recall baseline vs injected token counts, surfaced in Memory Browser
+- [x] Benchmark suite: recall@K, MRR, nDCG, latency — `npm run bench` (see [src/eval/README.md](src/eval/README.md))
+- [x] Proof suite: persistence, cross-harness portability (REST → MCP), task utility — `npm run proof` (see [src/eval/proof/README.md](src/eval/proof/README.md))
 - [ ] Embedding caching layer
 - [ ] Python client SDK
-- [x] Benchmark suite: recall@K, MRR, nDCG, latency — `npm run bench` (see [src/eval/README.md](src/eval/README.md))
-- [x] Proof suite: persistence, cross-harness portability (REST → MCP), task utility (cold vs warm LLM) — `npm run proof` (see [src/eval/proof/README.md](src/eval/proof/README.md))
+
+---
+
+## 🤝 Contributing
+
+Issues and pull requests are welcome. For large changes, open an issue first to discuss the approach.
+
+```bash
+npm install
+npm run dev          # start the server in watch mode
+npm run dev:ui       # start the Vite UI dev server
+npm run test:unit    # unit tests (no Docker required)
+npm run test:all     # full integration suite (requires Docker)
+npm run bench        # recall benchmark
+```
+
+---
 
 ## 📜 License
 
-MIT
+[MIT](LICENSE)
