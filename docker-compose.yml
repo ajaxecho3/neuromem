@@ -157,8 +157,16 @@ services:
       # Server mode: 'stdio' (MCP via stdio) or 'http' (REST + SSE)
       SERVER_MODE: ${SERVER_MODE:-http}
       HTTP_PORT: 3000
+      # ── Proxy mode — drop-in OpenAI-compatible LLM proxy ──────────
+      # Set PROXY_ENABLED=true to activate. Agent only needs to change baseURL.
+      PROXY_ENABLED: ${PROXY_ENABLED:-false}
+      PROXY_PORT: ${PROXY_PORT:-3001}
+      PROXY_TARGET_URL: ${PROXY_TARGET_URL:-}
+      PROXY_TARGET_PROVIDER: ${PROXY_TARGET_PROVIDER:-openai}
+      PROXY_MEMORY_BUDGET_PCT: ${PROXY_MEMORY_BUDGET_PCT:-0.20}
     ports:
       - "${NEUROMEM_PORT:-3000}:3000"
+      - "${PROXY_PORT:-3001}:3001"
     networks:
       - neuromem-net
 

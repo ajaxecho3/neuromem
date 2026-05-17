@@ -568,33 +568,162 @@ Respond with only the JSON array, no other text.`;
 
   // ─── BUILD CONTEXT ────────────────────────────────────────────
   /**
-   * Returns a compact, ready-to-inject context string for LLM prompts.
-   * Recalls top-N memories ranked by relevance and formats them as
-   * a numbered list — dramatically reduces token usage vs. full history.
+   * Returns a token-budget-aware, scored memory context block for LLM prompts.
+   *
+   * Scoring per memory:
+   *   score = rank_relevance × (importance ^ 0.7) × recency_decay
+   *
+   *   rank_relevance  — exponential decay over RRF rank position (rank 0 = 1.0)
+   *   importance      — dampened with ^0.7 so high-importance doesn't dominate
+   *   recency_decay   — e^(-λ × days_old), λ = 0.05 (half-life ≈ 14 days)
+   *
+   * Memories are greedily added in score order until context_budget tokens
+   * would be exceeded. The returned `context` is a <memory> XML block ready
+   * to splice into a system prompt.
    */
   async buildContext(
     query: string,
     agent_id = "default",
-    limit = 8,
-  ): Promise<{ context: string; memories: Memory[]; token_estimate: number }> {
-    const result = await this.recall({ query, agent_id, limit });
-    const memories = result.memories;
+    opts: { limit?: number; context_budget?: number; model?: string } | number = {},
+  ): Promise<{
+    context: string;
+    memories: Memory[];
+    token_estimate: number;
+    metadata: {
+      total_candidates: number;
+      injected_count: number;
+      tokens_used: number;
+      budget_exhausted: boolean;
+      over_budget_warning?: boolean;
+    };
+  }> {
+    // Back-compat: old callers pass limit as a plain number
+    const { limit = 8, context_budget, model } =
+      typeof opts === "number" ? { limit: opts, context_budget: undefined, model: undefined } : opts;
 
-    if (memories.length === 0) {
-      return { context: "", memories: [], token_estimate: 0 };
+    // Clamp budget to a safe range; 0 or negative → return empty
+    const budget = context_budget !== undefined
+      ? Math.max(0, context_budget)
+      : undefined;
+
+    if (budget === 0) {
+      return {
+        context: "",
+        memories: [],
+        token_estimate: 0,
+        metadata: { total_candidates: 0, injected_count: 0, tokens_used: 0, budget_exhausted: true },
+      };
     }
 
-    const lines = memories.map((m, i) => {
-      const typeLabel = m.type.toUpperCase();
-      const tags = m.tags.length ? ` [${m.tags.slice(0, 3).join(", ")}]` : "";
-      return `${i + 1}. [${typeLabel}${tags}] ${m.content}`;
+    // Over-fetch candidates so scoring can demote lower-quality results
+    const fetchLimit = limit * 3;
+    const result = await this.recall({ query, agent_id, limit: fetchLimit });
+    const candidates = result.memories;
+
+    if (candidates.length === 0) {
+      return {
+        context: "",
+        memories: [],
+        token_estimate: 0,
+        metadata: { total_candidates: 0, injected_count: 0, tokens_used: 0, budget_exhausted: false },
+      };
+    }
+
+    // ─── Score each candidate ──────────────────────────────────
+    const LAMBDA = 0.05; // recency decay rate (~14-day half-life)
+    const now = Date.now();
+
+    const scored = candidates.map((m, rank) => {
+      // Rank relevance: exponential decay so rank-0 = 1.0, rank-5 ≈ 0.22
+      const rank_relevance = Math.exp(-0.3 * rank);
+
+      // Importance: dampen with ^0.7 to prevent high-importance noise from dominating
+      const importance_score = Math.pow(Math.max(0, Math.min(1, m.importance ?? 0.5)), 0.7);
+
+      // Recency decay: working memory defaults to 0 days old (always fresh)
+      const ts = m.timestamp ? new Date(m.timestamp).getTime() : now;
+      const days_old = Math.max(0, (now - ts) / (1000 * 60 * 60 * 24));
+      const recency_decay = Math.exp(-LAMBDA * days_old);
+
+      const score = rank_relevance * importance_score * recency_decay;
+      return { mem: m, score };
     });
 
-    const context = `### Relevant memory context\n${lines.join("\n")}`;
-    // Rough token estimate: ~4 chars per token
-    const token_estimate = Math.ceil(context.length / 4);
+    // Sort descending by score
+    scored.sort((a, b) => b.score - a.score);
 
-    return { context, memories, token_estimate };
+    // ─── Greedy token-budget fill ──────────────────────────────
+    const { countTokens, encodingForModel } = await import("../utils/tokens.js");
+    const encoding = encodingForModel(model);
+
+    const formatLine = (m: Memory): string => {
+      const tags = m.tags.length ? ` #${m.tags.slice(0, 3).join(" #")}` : "";
+      return `[${m.type}]${tags} ${m.content}  (importance: ${(m.importance ?? 0).toFixed(2)})`;
+    };
+
+    // Header/footer token overhead for the <memory> XML wrapper
+    const HEADER = "<memory>\n";
+    const FOOTER = "</memory>";
+    let tokensUsed = countTokens(HEADER + FOOTER, encoding);
+    const PER_ITEM_OVERHEAD = 4; // newline + formatting chars per entry
+
+    const selected: Memory[] = [];
+    let budgetExhausted = false;
+    let overBudgetWarning = false;
+
+    for (const { mem } of scored) {
+      const line = formatLine(mem);
+      const lineTokens = countTokens(line, encoding) + PER_ITEM_OVERHEAD;
+
+      if (budget !== undefined && tokensUsed + lineTokens > budget) {
+        // Edge case: first memory alone exceeds budget — include it with a warning
+        if (selected.length === 0) {
+          selected.push(mem);
+          tokensUsed += lineTokens;
+          overBudgetWarning = true;
+        } else {
+          budgetExhausted = true;
+        }
+        break;
+      }
+
+      selected.push(mem);
+      tokensUsed += lineTokens;
+
+      // Stop once we've filled up to the requested limit
+      if (selected.length >= limit) break;
+    }
+
+    // ─── Format output ─────────────────────────────────────────
+    if (selected.length === 0) {
+      return {
+        context: "",
+        memories: [],
+        token_estimate: 0,
+        metadata: {
+          total_candidates: candidates.length,
+          injected_count: 0,
+          tokens_used: 0,
+          budget_exhausted: false,
+        },
+      };
+    }
+
+    const lines = selected.map(formatLine);
+    const context = `<memory>\n${lines.join("\n")}\n</memory>`;
+
+    return {
+      context,
+      memories: selected,
+      token_estimate: tokensUsed,
+      metadata: {
+        total_candidates: candidates.length,
+        injected_count: selected.length,
+        tokens_used: tokensUsed,
+        budget_exhausted: budgetExhausted,
+        ...(overBudgetWarning ? { over_budget_warning: true } : {}),
+      },
+    };
   }
 
   // ─── Internal ─────────────────────────────────────────────────
