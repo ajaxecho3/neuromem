@@ -24,7 +24,10 @@
     "proof": "tsx src/eval/proof/run-all.ts",
     "proof:persist": "tsx src/eval/proof/persistence.ts",
     "proof:xharness": "tsx src/eval/proof/cross-harness.ts",
-    "proof:tasks": "tsx src/eval/proof/task-eval.ts"
+    "proof:tasks": "tsx src/eval/proof/task-eval.ts",
+    "test:unit": "tsx src/eval/unit/tokenizer.test.ts && tsx src/eval/unit/extractor.test.ts",
+    "test:integration": "tsx src/eval/integration/proxy-e2e.ts",
+    "test:all": "npm run test:unit && docker compose up -d && sleep 15 && npm run test:integration"
   },
   "keywords": [
     "mcp",

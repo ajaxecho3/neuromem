@@ -24,6 +24,7 @@ import { fileURLToPath } from "node:url";
 import { join, dirname } from "node:path";
 import { createUiRouter } from "../ui-api/routes.js";
 import { parseTimeExpression } from "../utils/timeParser.js";
+import { extractAndStore } from "../cognition/Extractor.js";
 
 // ─── Zod schemas ───────────────────────────────────────────────
 
@@ -89,11 +90,31 @@ const BuildContextSchema = z.object({
   query: z.string(),
   agent_id: z.string().default("default"),
   limit: z.number().default(8),
+  context_budget: z
+    .number()
+    .optional()
+    .describe(
+      "Max tokens to spend on injected memories (default: unlimited). " +
+      "Recommended: set to 20% of your model's context window, e.g. 2048 for 128k models.",
+    ),
+  model: z
+    .string()
+    .optional()
+    .describe(
+      "Model name for token counting accuracy (e.g. 'gpt-4o', 'claude-3-5-sonnet'). " +
+      "Defaults to cl100k_base encoding if omitted.",
+    ),
 });
 const RememberBatchSchema = z.object({
   memories: z.array(RememberSchema).min(1).max(20),
 });
 const MemoryHistorySchema = z.object({ id: z.string() });
+const ExtractTurnSchema = z.object({
+  user_message: z.string().describe("The user's message in the conversation turn."),
+  assistant_response: z.string().describe("The assistant's response to extract memories from."),
+  agent_id: z.string().default("default"),
+  session_id: z.string().optional(),
+});
 
 // ─── Build MCP server ──────────────────────────────────────────
 
@@ -348,14 +369,20 @@ function buildMcpServer(
     "build_context",
     {
       description:
-        "Build a compact, ready-to-inject memory context string for LLM prompts. " +
-        "Recalls top-N relevant memories and formats them as a numbered list. " +
-        "Use this INSTEAD of passing full conversation history to reduce token consumption.",
+        "Build a token-budget-aware memory context block for LLM prompts. " +
+        "Scores memories by relevance × importance × recency, then greedily fills " +
+        "up to context_budget tokens. Returns a <memory> XML block ready to splice " +
+        "into your system prompt, plus metadata (candidates scanned, tokens used). " +
+        "Use this INSTEAD of passing full conversation history to cut token costs by 10–30×.",
       inputSchema: BuildContextSchema.shape,
     },
-    async ({ query, agent_id, limit }) => {
+    async ({ query, agent_id, limit, context_budget, model }) => {
       try {
-        const result = await mgr.buildContext(query, agent_id, limit);
+        const result = await mgr.buildContext(query, agent_id, {
+          limit,
+          context_budget,
+          model,
+        });
         return {
           content: [
             { type: "text" as const, text: JSON.stringify(result, null, 2) },
@@ -386,6 +413,45 @@ function buildMcpServer(
     async ({ memories }) => {
       try {
         const result = await mgr.rememberBatch(memories);
+        return {
+          content: [
+            { type: "text" as const, text: JSON.stringify(result, null, 2) },
+          ],
+        };
+      } catch (err: any) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Error: ${err.message ?? String(err)}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.registerTool(
+    "extract_turn",
+    {
+      description:
+        "Manually trigger post-turn memory extraction on a conversation exchange. " +
+        "Automatically identifies facts, decisions, and preferences worth remembering " +
+        "and stores them — without you needing to call remember() for each one. " +
+        "The proxy calls this automatically; use this tool directly if not using the proxy.",
+      inputSchema: ExtractTurnSchema.shape,
+    },
+    async ({ user_message, assistant_response, agent_id, session_id }) => {
+      try {
+        const result = await extractAndStore(
+          agent_id,
+          user_message,
+          assistant_response,
+          mgr,
+          mgr.innerThought,
+          session_id,
+        );
         return {
           content: [
             { type: "text" as const, text: JSON.stringify(result, null, 2) },
@@ -598,6 +664,39 @@ async function startHttp(mgr: MemoryManager, consolidator: Consolidator) {
     console.log(`[neuromem] REST endpoints under /tools/*`);
     console.log(`[neuromem] MCP Streamable HTTP at /mcp`);
   });
+
+  // ── Proxy mode (optional) ────────────────────────────────────────
+  if (config.proxy.enabled) {
+    if (!config.proxy.targetUrl) {
+      console.error(
+        "[Proxy] ERROR: PROXY_ENABLED=true but PROXY_TARGET_URL is not set. " +
+          "Set PROXY_TARGET_URL to your LLM API base URL (e.g. https://api.openai.com).",
+      );
+      process.exit(1);
+    }
+
+    const { mountProxy } = await import("../proxy/ProxyServer.js");
+    const proxyApp = express();
+    proxyApp.use(express.json({ limit: "10mb" }));
+
+    mountProxy(proxyApp, mgr, mgr.innerThought, {
+      targetUrl: config.proxy.targetUrl,
+      targetProvider: config.proxy.targetProvider,
+      memoryBudgetPct: config.proxy.memoryBudgetPct,
+    });
+
+    proxyApp.listen(config.proxy.port, () => {
+      console.log(
+        `[Proxy] Listening on :${config.proxy.port} → ${config.proxy.targetUrl}`,
+      );
+      console.log(
+        `[Proxy] Set your agent's baseURL to http://localhost:${config.proxy.port}/v1`,
+      );
+      console.log(
+        `[Proxy] Pass X-NeuroMem-Agent-Id header to namespace memories per agent`,
+      );
+    });
+  }
 }
 
 // ─── Stdio mode ────────────────────────────────────────────────

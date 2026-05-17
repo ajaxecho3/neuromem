@@ -5,7 +5,8 @@
 # ─────────────────────────────────────────────────────────────────
 
 .PHONY: help up down build restart logs status \
-        dev demo backup reset lint typecheck
+        dev demo backup reset lint typecheck install uninstall \
+        proxy-up proxy-logs
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -50,6 +51,37 @@ build-ts: ## Compile TypeScript
 
 typecheck: ## Type-check without emitting
 	npx tsc --noEmit
+
+# ── Install & connect ────────────────────────────────────────────
+
+install: ## Install NeuroMem and connect to AI tools (Claude Code, OpenCode, Cursor)
+	bash scripts/install.sh
+
+install-claude: ## Connect to Claude Code only
+	bash scripts/install.sh --tools claude-code
+
+install-opencode: ## Connect to OpenCode only
+	bash scripts/install.sh --tools opencode
+
+install-cursor: ## Connect to Cursor only
+	bash scripts/install.sh --tools cursor
+
+install-copilot: ## Connect to GitHub Copilot only
+	bash scripts/install.sh --tools copilot
+
+uninstall: ## Disconnect NeuroMem from all AI tools (keeps data)
+	bash scripts/uninstall.sh
+
+uninstall-wipe: ## Disconnect and delete ALL memory data (irreversible)
+	bash scripts/uninstall.sh --wipe-data --stop-docker
+
+# ── Proxy mode ───────────────────────────────────────────────────
+
+proxy-up: ## Start stack with drop-in LLM proxy enabled (requires PROXY_TARGET_URL)
+	PROXY_ENABLED=true docker compose up -d --build
+
+proxy-logs: ## Follow proxy-specific log lines only
+	docker compose logs -f neuromem | grep "\[Proxy\]"
 
 # ── Data management ──────────────────────────────────────────────
 

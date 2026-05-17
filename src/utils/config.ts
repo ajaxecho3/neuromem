@@ -65,4 +65,21 @@ export const config = {
     ),
     retentionScaleDays: parseInt(process.env.RETENTION_SCALE_DAYS ?? "30", 10),
   },
+  proxy: {
+    /** Set PROXY_ENABLED=true to activate the drop-in LLM proxy */
+    enabled: (process.env.PROXY_ENABLED ?? "false") === "true",
+    /** Port to expose the proxy on (separate from the MCP/REST port) */
+    port: parseInt(process.env.PROXY_PORT ?? "3001", 10),
+    /** Full base URL of the upstream LLM API, e.g. https://api.openai.com */
+    targetUrl: process.env.PROXY_TARGET_URL ?? "",
+    /** openai | anthropic — affects SSE parsing strategy */
+    targetProvider: (process.env.PROXY_TARGET_PROVIDER ?? "openai") as
+      | "openai"
+      | "anthropic",
+    /** Fraction of context window allocated to memory injection (clamped 0.05–0.40) */
+    memoryBudgetPct: Math.min(
+      0.40,
+      Math.max(0.05, parseFloat(process.env.PROXY_MEMORY_BUDGET_PCT ?? "0.20")),
+    ),
+  },
 };
